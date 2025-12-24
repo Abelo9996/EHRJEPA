@@ -49,6 +49,20 @@ checkpoints/
 *.csv
 !data/sample_ehr/sample_ehr_data.csv
 
-# Results
+# Processed data
+data/mimic_visits/
+data/mimic_large/
+data/processed_mimic/
+
+# Results and visualizations
 results/
 outputs/
+visualizations/
+downstream_results/
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+eval_output.log
+training_output.log

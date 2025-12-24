@@ -64,9 +64,16 @@ class MIMICEHRDataset(Dataset):
         
         # Get feature columns
         if feature_columns is None:
-            # Exclude patient_id and visit_time from features
-            self.feature_columns = [col for col in self.data.columns 
-                                   if col not in ['patient_id', 'visit_time', 'hadm_id']]
+            # Select only numeric columns and exclude identifiers/timestamps
+            exclude_cols = ['patient_id', 'visit_time', 'hadm_id', 'subject_id', 
+                          'admittime', 'dischtime', 'deathtime', 'edregtime', 'edouttime',
+                          'dod', 'charttime', 'intime', 'outtime']
+            
+            # Get numeric columns
+            numeric_cols = self.data.select_dtypes(include=[np.number]).columns.tolist()
+            
+            # Exclude identifier columns
+            self.feature_columns = [col for col in numeric_cols if col not in exclude_cols]
         else:
             self.feature_columns = feature_columns
         
@@ -98,9 +105,16 @@ class MIMICEHRDataset(Dataset):
         elif 'subject_id' in df.columns:
             # MIMIC-IV uses subject_id
             df = df.rename(columns={'subject_id': 'patient_id'})
+            # Handle different time columns
             if 'charttime' in df.columns:
                 df = df.rename(columns={'charttime': 'visit_time'})
-            df = df.sort_values(['patient_id', 'visit_time']).reset_index(drop=True)
+            elif 'admittime' in df.columns:
+                df = df.rename(columns={'admittime': 'visit_time'})
+            elif 'intime' in df.columns:
+                df = df.rename(columns={'intime': 'visit_time'})
+            
+            if 'visit_time' in df.columns:
+                df = df.sort_values(['patient_id', 'visit_time']).reset_index(drop=True)
         
         return df
     

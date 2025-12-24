@@ -1,0 +1,97 @@
+# JEPA-EHR Configuration - Visit-Level Sequences
+# For learning long-term clinical concepts, disease progression, patient phenotypes
+
+data:
+  # Path to visit-level processed data
+  data_path: /Users/abelyagubyan/Downloads/EHRJEPA/data/mimic_visits/train_mimic_ehr.csv
+  
+  # Batch size
+  batch_size: 64  # Smaller than hourly due to richer features per timestep
+  
+  # Sequence parameters (VISITS not hours)
+  sequence_length: 20    # 20 consecutive visits per patient
+  context_length: 15     # First 15 visits as context
+  prediction_length: 5   # Predict next 5 visits
+  
+  # Feature columns (null = use all)
+  feature_columns: null
+  
+  # Data loader settings
+  num_workers: 4
+  pin_mem: true
+  drop_last: true
+
+logging:
+  folder: /Users/abelyagubyan/Downloads/EHRJEPA/logs/jepa_visits/
+  write_tag: jepa-visits
+
+mask:
+  # Masking strategy for visit sequences
+  masking_strategy: simple
+  
+  # For 'temporal' masking
+  allow_overlap: false
+  num_context_blocks: 2
+  num_pred_blocks: 2
+  block_size_range: [1, 3]  # Block of 1-3 visits
+  context_ratio: 0.75
+
+meta:
+  # Model architecture
+  # Use base or large for richer visit-level features
+  model_name: temporal_transformer_base
+  
+  # Predictor configuration
+  pred_depth: 8           # Deeper predictor for complex visit patterns
+  pred_emb_dim: 384       # Embedding dimension in predictor
+  
+  # Checkpoint settings
+  load_checkpoint: false
+  read_checkpoint: null   # Path to checkpoint file (if load_checkpoint=true)
+  
+  # Precision
+  use_bfloat16: false     # Use bfloat16 for training (set to false for CPU/debugging)
+
+optimization:
+  # Training epochs
+  epochs: 100
+  
+  # Learning rate schedule
+  start_lr: 0.00005       # Warmup starting learning rate
+  lr: 0.0005              # Peak learning rate
+  final_lr: 0.00001       # Final learning rate after decay
+  warmup: 20              # Warmup epochs
+  
+  # Weight decay (L2 regularization)
+  weight_decay: 0.05
+  final_weight_decay: 0.05
+  
+  # EMA (Exponential Moving Average) for target encoder
+  ema: [0.996, 1.0]       # [start_ema, end_ema]
+  
+  # Iterations per epoch scale (for scheduler)
+  ipe_scale: 1.0
+
+# Comments on key differences from hourly approach:
+# ────────────────────────────────────────────────
+# 1. sequence_length=20 VISITS (not hours)
+#    - Captures months/years of patient history
+#    - Each visit = aggregated encounter summary
+#
+# 2. Features ~200-300 (not 25)
+#    - Rich semantic information per visit
+#    - Diagnoses, procedures, lab trends, vital summaries
+#
+# 3. Lower learning rate (0.0005 vs 0.001)
+#    - Visit-level features are more stable/meaningful
+#    - Less noise than hourly vitals
+#
+# 4. More epochs (100 vs 50)
+#    - Fewer timesteps total but richer per-timestep info
+#    - Need more epochs to learn complex disease patterns
+#
+# 5. Downstream tasks should be:
+#    - Readmission prediction (30-day, 1-year)
+#    - Disease progression forecasting
+#    - Patient cohort identification
+#    - Long-term mortality risk
