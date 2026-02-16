@@ -355,15 +355,119 @@ meta:
 - Increase dataset size (use more patients)
 - Try task-specific fine-tuning instead of linear probes
 
+## PhD Benchmark Suite
+
+For rigorous comparison with state-of-the-art EHR foundation models (EHRMamba, CLMBR, Med-BERT, BEHRT, TransformEHR), we provide a comprehensive benchmark suite.
+
+### Benchmark Tasks
+
+| Task | Type | Description | SOTA AUROC |
+|------|------|-------------|------------|
+| `mortality` | Binary | In-hospital mortality | 0.89 (EHRMamba) |
+| `mortality_30d` | Binary | 30-day mortality | 0.85 |
+| `readmission_30d` | Binary | 30-day readmission | 0.72 (EHRMamba) |
+| `los_3class` | 3-class | LOS (short/medium/long) | 0.78 |
+| `los_7class` | 7-class | LOS (7 categories) | 0.65 |
+| `icu` | Binary | ICU admission prediction | 0.85 |
+| `phenotyping` | Multi-label | 25 chronic conditions | 0.82 (EHRMamba) |
+
+### Baseline Models
+
+**Sklearn Baselines:**
+- Logistic Regression (L2 regularized)
+- Random Forest (100 trees)
+- Gradient Boosting (100 trees)
+
+**Neural Baselines (no pretraining):**
+- LSTM (bidirectional, 2-layer, attention)
+- Transformer (4-layer, no pretraining)
+- GRU-D (with decay for missing data)
+
+**Pretrained Models:**
+- JEPA (linear probing)
+- JEPA (fine-tuned)
+
+### Running the Benchmark
+
+```bash
+# Full benchmark pipeline
+./run_benchmark.sh --mimic_dir ./mimic-iv-2.1 --checkpoint ./checkpoints/latest.pt
+
+# Or step by step:
+
+# 1. Preprocess data (300+ features)
+python benchmark/preprocess_benchmark.py \
+    --mimic_dir ./mimic-iv-2.1 \
+    --output_dir ./data/benchmark \
+    --min_visits 3
+
+# 2. Train neural baselines
+python benchmark/train_baselines.py \
+    --data_dir ./data/benchmark \
+    --task mortality \
+    --model all \
+    --epochs 50
+
+# 3. Evaluate all models
+python benchmark/evaluate_benchmark.py \
+    --data_dir ./data/benchmark \
+    --checkpoint ./checkpoints/jepa.pt \
+    --kfold 5  # 5-fold CV
+```
+
+### Benchmark Features
+
+The benchmark preprocessing extracts **300-400 features** per visit:
+
+| Category | Features | Description |
+|----------|----------|-------------|
+| Demographics | ~20 | Age, gender, race, insurance, admission type |
+| Diagnoses | 101 | Top 100 ICD-10 codes + count |
+| Procedures | 51 | Top 50 procedure codes + count |
+| Labs | 60 | 15 labs × (mean, std, min, max) |
+| Vitals | 24 | 6 vitals × (mean, std, min, max) |
+| Medications | 51 | Top 50 drugs + count |
+| **Total** | **~300** | |
+
+### Evaluation Protocol
+
+Following best practices from clinical ML literature:
+
+1. **Patient-stratified splits**: No data leakage between train/val/test
+2. **5-fold cross-validation**: Robust performance estimates
+3. **Bootstrap confidence intervals**: 95% CI via 1000 bootstrap samples
+4. **Statistical significance**: Paired t-test between models
+5. **Multiple metrics**: AUROC, AUPRC, F1, Precision, Recall
+
+### Expected Results Format
+
+```
+================================================================================
+BENCHMARK RESULTS SUMMARY
+================================================================================
+
+Task                 Metric     LR         RF         LSTM       JEPA
+--------------------------------------------------------------------------------
+mortality            auroc      0.8234     0.8456     0.8612     0.8845
+mortality_30d        auroc      0.7856     0.7923     0.8034     0.8234
+readmission_30d      auroc      0.6543     0.6678     0.6923     0.7156
+los_3class           macro_f1   0.5234     0.5456     0.5678     0.5923
+phenotyping          macro_f1   0.7123     0.7234     0.7456     0.7823
+--------------------------------------------------------------------------------
+```
+
 ## Roadmap
 
-- [ ] Add more downstream evaluation tasks
-- [ ] Implement multi-modal learning (text + structured data)
+- [x] Add PhD-level benchmark suite
+- [x] Implement standard evaluation tasks (7 tasks)
+- [x] Add neural network baselines (LSTM, Transformer, GRU-D)
+- [x] 5-fold cross-validation with confidence intervals
+- [ ] Pre-trained model checkpoints (coming soon)
+- [ ] Multi-modal learning (text + structured data)
 - [ ] Support for other EHR datasets (eICU, OMOP)
 - [ ] Distributed training support
-- [ ] Pre-trained model checkpoints
 - [ ] Interactive visualization dashboard
 
 ---
 
-**Last Updated**: December 2025
+**Last Updated**: February 2025

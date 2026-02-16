@@ -1,5 +1,5 @@
 # JEPA-EHR Requirements
-# Core dependencies for JEPA-EHR training
+# Core dependencies for JEPA-EHR training and PhD benchmark
 
 # PyTorch (install appropriate version for your CUDA)
 torch>=2.0.0
@@ -12,11 +12,19 @@ pandas>=1.3.0
 # Configuration
 pyyaml>=6.0
 
-# Optional but recommended
-matplotlib>=3.4.0  # For visualization
+# Machine Learning & Evaluation
 scikit-learn>=1.0.0  # For downstream tasks and evaluation
-tensorboard>=2.10.0  # For monitoring (optional)
+scipy>=1.7.0  # For statistical tests
 
-# For MIMIC-IV preprocessing (if needed)
+# Visualization
+matplotlib>=3.4.0
+seaborn>=0.11.0  # For heatmaps and advanced plots
+
+# Monitoring
+tensorboard>=2.10.0  # For training monitoring
+tqdm>=4.62.0  # Progress bars
+
+# Optional
+# wandb>=0.12.0  # Weights & Biases logging
 # pyarrow>=10.0.0  # For parquet files
 # sqlalchemy>=1.4.0  # For database access

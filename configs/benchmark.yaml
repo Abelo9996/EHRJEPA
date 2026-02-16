@@ -1,0 +1,145 @@
+# ============================================================================
+# EHR-JEPA Benchmark Configuration
+# PhD-Level Evaluation Settings
+# ============================================================================
+
+# Data Configuration
+data:
+  mimic_dir: "./mimic-iv-2.1"
+  output_dir: "./data/benchmark"
+  min_visits_per_patient: 3
+  sequence_length: 20
+  overlap_ratio: 0.5
+
+# Model Configuration (Base model for fair comparison)
+model:
+  name: "temporal_transformer_base"
+  embed_dim: 768
+  depth: 12
+  num_heads: 12
+  mlp_ratio: 4.0
+  drop_rate: 0.1
+  
+  # Predictor
+  pred_embed_dim: 384
+  pred_depth: 8
+  pred_num_heads: 12
+
+# JEPA Configuration
+jepa:
+  # Masking
+  context_length: 15
+  num_targets: 4
+  target_min_length: 2
+  target_max_length: 5
+  
+  # EMA
+  ema_momentum: 0.996
+  ema_end_momentum: 1.0
+
+# Training Configuration
+training:
+  epochs: 100
+  batch_size: 64
+  
+  # Optimizer
+  optimizer: "adamw"
+  learning_rate: 1.0e-4
+  min_lr: 1.0e-6
+  warmup_epochs: 10
+  weight_decay: 0.05
+  
+  # Regularization
+  dropout: 0.1
+  label_smoothing: 0.0
+  
+  # Early stopping
+  patience: 20
+  
+  # Checkpointing
+  save_every: 10
+  checkpoint_dir: "./checkpoints/benchmark"
+
+# Evaluation Configuration
+evaluation:
+  # Tasks
+  tasks:
+    - mortality
+    - mortality_30d
+    - readmission_30d
+    - los_3class
+    - los_7class
+    - icu
+    - phenotyping
+  
+  # Baselines
+  baselines:
+    sklearn:
+      - logistic_regression
+      - random_forest
+      - gradient_boosting
+    neural:
+      - lstm
+      - transformer
+      - grud
+  
+  # Cross-validation
+  n_folds: 5
+  stratified: true
+  
+  # Metrics
+  metrics:
+    binary:
+      - auroc
+      - auprc
+      - f1
+      - precision
+      - recall
+    multiclass:
+      - auroc
+      - macro_f1
+      - weighted_f1
+      - accuracy
+    multilabel:
+      - auroc
+      - auprc
+      - macro_f1
+      - micro_f1
+  
+  # Confidence intervals
+  bootstrap:
+    n_samples: 1000
+    confidence_level: 0.95
+
+# Neural Baseline Configuration
+baselines:
+  lstm:
+    hidden_dim: 256
+    n_layers: 2
+    dropout: 0.3
+    bidirectional: true
+  
+  transformer:
+    d_model: 256
+    n_heads: 4
+    n_layers: 4
+    dropout: 0.1
+  
+  grud:
+    hidden_dim: 256
+    dropout: 0.3
+
+# Hardware
+hardware:
+  device: "cuda"
+  num_workers: 4
+  pin_memory: true
+  mixed_precision: true
+
+# Logging
+logging:
+  wandb:
+    project: "ehr-jepa-benchmark"
+    entity: null
+  tensorboard: true
+  log_dir: "./logs/benchmark"
