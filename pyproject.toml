@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ehrjepa"
+version = "0.0.0"
+description = "A joint-embedding predictive architecture for longitudinal EHR event streams in MEDS format."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Abel Yagubyan", email = "abelyagubyan@berkeley.edu" }]
+keywords = ["ehr", "meds", "jepa", "self-supervised", "foundation-model"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.4",
+  "numpy>=1.26",
+  "polars>=1.0",
+  "pyarrow>=16.0",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.4",
+  # meds is the MEDS schema package; 0.4.x is the current schema revision.
+  # meds_etl caps its own meds dependency (0.3.2 allows meds<=0.4, and every
+  # later meds_etl release pins meds==0.3.3), so meds 0.4.0 + meds_etl 0.3.2 is
+  # the newest schema/ETL pair that co-installs. Revisit once meds_etl catches up.
+  "meds>=0.4,<0.5",
+  "meds_etl>=0.3,<0.4",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "pre-commit>=3.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/Abelo9996/EHRJEPA"
+Repository = "https://github.com/Abelo9996/EHRJEPA"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ehrjepa"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ehrjepa"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error::DeprecationWarning:ehrjepa.*"]

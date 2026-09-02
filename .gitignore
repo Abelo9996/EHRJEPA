@@ -3,27 +3,24 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+
+# Environments
+.venv/
 venv/
 env/
 ENV/
 
-# IDE
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# IDE / OS
 .vscode/
 .idea/
 *.swp
@@ -31,38 +28,22 @@ ENV/
 *~
 .DS_Store
 
-# Data files - MIMIC-IV dataset
-mimic-iv-2.1/
+# Data: nothing under the top-level data/ is tracked. MIMIC-IV, EHRSHOT and any
+# MEDS extract derived from them are credentialed and must never be committed.
+# Leading slash so this does not also swallow src/ehrjepa/data/.
+/data/
+*.parquet
+*.csv
+*.csv.gz
 
-# Model checkpoints and logs
+# Runs, checkpoints, logs
+checkpoints/
+runs/
 logs/
+outputs/
+results/
 *.pth
 *.pth.tar
 *.ckpt
-checkpoints/
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Large CSV files
-*.csv
-!data/sample_ehr/sample_ehr_data.csv
-
-# Processed data
-data/mimic_visits/
-data/mimic_large/
-data/processed_mimic/
-
-# Results and visualizations
-results/
-outputs/
-visualizations/
-downstream_results/
-
-# Temporary files
 *.log
 *.tmp
-*.temp
-eval_output.log
-training_output.log

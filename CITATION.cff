@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: >-
+  Placeholder. EHRJEPA is under active rebuild and has no release or preprint
+  yet; please do not cite it as a result. This file will be filled in when there
+  is something to cite.
+title: EHRJEPA
+abstract: >-
+  A joint-embedding predictive architecture for longitudinal electronic health
+  records represented as MEDS clinical-event token streams.
+type: software
+authors:
+  - family-names: Yagubyan
+    given-names: Abel
+    email: abelyagubyan@berkeley.edu
+repository-code: "https://github.com/Abelo9996/EHRJEPA"
+license: Apache-2.0
+version: 0.0.0
