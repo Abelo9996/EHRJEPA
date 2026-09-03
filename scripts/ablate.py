@@ -19,6 +19,13 @@ steps, so "same budget" survives a config change instead of quietly becoming
 be interrupted -- by a sleep, an OOM, a closed lid -- and the recovery has to be
 "launch the same command again", not "work out which four runs finished".
 
+**Re-evaluation without retraining.** A run may name ``reuse_checkpoint:``
+instead of training: the cell is scored from a checkpoint an earlier grid already
+produced, its metrics read out of that run's ``metrics.csv``, and its row lands in
+*this* grid's summary. That is what makes "the same checkpoint under a different
+pooling" a row rather than a footnote, and it never writes into the other grid's
+directory.
+
 **Baselines computed once.** ``lr`` and ``gbm`` are count-feature models with no
 dependence on the encoder, so their held-out scores are read straight out of an
 earlier run's ``predictions.parquet`` rather than refit six times.
@@ -65,6 +72,7 @@ __all__ = ["Grid", "GridRun", "load_grid", "plan", "render_summary", "run_grid"]
 SUMMARY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("run", "run"),
     ("objective", "objective"),
+    ("pooling", "probe"),
     ("target_mode", "target"),
     ("lambda_sigreg", "lambda"),
     ("p_future", "p_future"),
@@ -84,11 +92,17 @@ SUMMARY_COLUMNS: tuple[tuple[str, str], ...] = (
 
 @dataclass
 class GridRun:
-    """One named cell of the grid."""
+    """One named cell of the grid.
+
+    ``reuse_checkpoint`` is a repo-relative path to an existing ``*.pt``. A cell
+    that names one is not trained: it is evaluated from that file, and its
+    training metrics are read from the ``metrics.csv`` beside it.
+    """
 
     name: str
     overrides: dict[str, Any] = field(default_factory=dict)
     budget_tokens: int = 0
+    reuse_checkpoint: str | None = None
 
     def override_strings(self) -> list[str]:
         return [f"{key}={_scalar(value)}" for key, value in self.overrides.items()]
@@ -113,7 +127,10 @@ class Grid:
     bootstrap: int = 200
     eval_subject_limit: int | None = 3000
     eval_subject_seed: int = 0
-    probe_features: str = "cls_mean"
+    #: ``auto`` resolves per checkpoint inside the harness (``last`` for causal,
+    #: ``mean`` for bidirectional); the resolved value lands in each row's
+    #: ``pooling``.
+    probe_features: str = "auto"
     probe_layer: str = "final"
     tasks: str = "all"
     reuse_predictions: str | None = None
@@ -186,18 +203,22 @@ def load_grid(path: str | Path) -> Grid:
     for item in raw["runs"]:
         if not isinstance(item, dict) or "name" not in item:
             raise ValueError(f"each run needs a name, got {item!r}")
-        extra = set(item) - {"name", "overrides", "budget_tokens"}
+        extra = set(item) - {"name", "overrides", "budget_tokens", "reuse_checkpoint"}
         if extra:
             raise ValueError(f"run {item['name']!r} has unknown keys: {sorted(extra)}")
         name = str(item["name"])
         if name in seen:
             raise ValueError(f"duplicate run name {name!r}")
         seen.add(name)
+        reuse = item.get("reuse_checkpoint")
+        if reuse and item.get("overrides"):
+            raise ValueError(f"run {name!r} reuses a checkpoint, so its overrides do nothing")
         runs.append(
             GridRun(
                 name=name,
                 overrides=dict(item.get("overrides") or {}),
                 budget_tokens=int(item.get("budget_tokens", default_budget)),
+                reuse_checkpoint=str(reuse) if reuse else None,
             )
         )
     fields = {
@@ -248,31 +269,74 @@ def plan(grid: Grid) -> list[dict]:
     done = {row["run"] for row in _load_rows(grid.summary_json)}
     out = []
     for item in grid.runs:
-        config = load_config(REPO / grid.base, item.override_strings())
-        steps = steps_for(item.budget_tokens, config.run.batch_size, config.data.max_len)
-        out.append(
-            {
-                "run": item.name,
-                "overrides": dict(item.overrides),
-                "budget_tokens": item.budget_tokens,
-                "batch_size": config.run.batch_size,
-                "max_len": config.data.max_len,
-                "steps": steps,
-                "tokens": steps * config.run.batch_size * config.data.max_len,
-                "objective": config.objective.kind,
-                # The three JEPA knobs are meaningless for an AR cell: it has no
-                # target network, no SIGReg term and no context/target masking.
-                # Reporting the base config's values there would invite a reader
-                # to compare a column that does not exist in that run.
-                "target_mode": _jepa_only(config, str(config.model.get("target_mode", "shared"))),
-                "lambda_sigreg": _jepa_only(config, config.objective.lambda_sigreg),
-                "p_future": _jepa_only(config, config.masking.p_future),
-                "out_dir": str(grid.run_root / item.name),
-                "eval_dir": str(grid.doc_dir / "eval" / item.name),
-                "done": item.name in done,
-            }
+        entry = _reuse_entry(item) if item.reuse_checkpoint else _train_entry(grid, item)
+        entry.update(
+            run=item.name,
+            overrides=dict(item.overrides),
+            budget_tokens=item.budget_tokens,
+            eval_dir=str(grid.doc_dir / "eval" / item.name),
+            done=item.name in done,
         )
+        out.append(entry)
     return out
+
+
+def _train_entry(grid: Grid, item: GridRun) -> dict:
+    """The cell resolved from the grid's base config plus this run's overrides."""
+    config = load_config(REPO / grid.base, item.override_strings())
+    steps = steps_for(item.budget_tokens, config.run.batch_size, config.data.max_len)
+    out_dir = grid.run_root / item.name
+    return {
+        "batch_size": config.run.batch_size,
+        "max_len": config.data.max_len,
+        "steps": steps,
+        "tokens": steps * config.run.batch_size * config.data.max_len,
+        "objective": config.objective.kind,
+        # The three JEPA knobs are meaningless for an AR cell: it has no target
+        # network, no SIGReg term and no context/target masking. Reporting the
+        # base config's values there would invite a reader to compare a column
+        # that does not exist in that run.
+        "target_mode": _jepa_only(config, str(config.model.get("target_mode", "shared"))),
+        "lambda_sigreg": _jepa_only(config, config.objective.lambda_sigreg),
+        "p_future": _jepa_only(config, config.masking.p_future),
+        "out_dir": str(out_dir),
+        "checkpoint": str(out_dir / "final.pt"),
+        "reuse": False,
+    }
+
+
+def _reuse_entry(item: GridRun) -> dict:
+    """The cell resolved from the *finished* run a ``reuse_checkpoint`` points into.
+
+    Everything describing the training comes from that run's own ``config.json``,
+    not from this grid's base: the row has to say what was actually trained, and
+    this grid's base may differ from the one that trained it.
+    """
+    assert item.reuse_checkpoint is not None
+    checkpoint = REPO / item.reuse_checkpoint
+    source = checkpoint.parent
+    config = json.loads((source / "config.json").read_text())
+    kind = str(config["objective"]["kind"])
+    batch_size = int(config["run"]["batch_size"])
+    max_len = int(config["data"]["max_len"])
+    steps = int(config["run"]["steps"])
+
+    def jepa_only(value: Any) -> Any:
+        return None if kind == "ar" else value
+
+    return {
+        "batch_size": batch_size,
+        "max_len": max_len,
+        "steps": steps,
+        "tokens": steps * batch_size * max_len,
+        "objective": kind,
+        "target_mode": jepa_only(str(config["model"].get("target_mode", "shared"))),
+        "lambda_sigreg": jepa_only(config["objective"]["lambda_sigreg"]),
+        "p_future": jepa_only(config["masking"]["p_future"]),
+        "out_dir": str(source),
+        "checkpoint": str(checkpoint),
+        "reuse": True,
+    }
 
 
 def _short(path: Path) -> str:
@@ -347,11 +411,25 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log) -> dict:
         log,
     )
     wall = time.perf_counter() - started
+    final = _final_metrics(out_dir)
+    final["wall_s"] = round(wall, 1)
+    return final
+
+
+def _final_metrics(out_dir: Path) -> dict:
+    """The last logged row of a run's ``metrics.csv``, with a steady-state tok/s."""
     rows = list(csv.DictReader((out_dir / "metrics.csv").open()))
     final = {k: _number(v) for k, v in rows[-1].items()} if rows else {}
     steady = [_number(r["tokens_per_s"]) for r in rows[1:]] or [final.get("tokens_per_s", 0.0)]
     final["tokens_per_s"] = sum(steady) / len(steady)
-    final["wall_s"] = round(wall, 1)
+    return final
+
+
+def reuse_one(entry: Mapping[str, Any], log: Log) -> dict:
+    """No training: read the reused run's final metrics and report zero wall time."""
+    log.say(f"reuse {entry['run']}: scoring {_short(Path(entry['checkpoint']))} as trained")
+    final = _final_metrics(Path(entry["out_dir"]))
+    final["wall_s"] = 0.0
     return final
 
 
@@ -362,9 +440,17 @@ def _number(text: str) -> float:
         return float("nan")
 
 
-def eval_one(grid: Grid, entry: Mapping[str, Any], with_controls: bool, log: Log) -> dict:
-    """Score one checkpoint on the shared cohort; return ``{model: {task: auroc}}``."""
-    checkpoint = Path(entry["out_dir"]) / "final.pt"
+def eval_one(
+    grid: Grid, entry: Mapping[str, Any], with_controls: bool, log: Log
+) -> tuple[dict, dict]:
+    """Score one checkpoint on the shared cohort.
+
+    Returns ``({model: {task: auroc}}, {model: pooling})``. The pooling comes back
+    from the harness rather than from the grid file because ``probe_features:
+    auto`` is resolved per checkpoint, and a row that does not say which pooling
+    produced its AUROCs is not comparable to anything.
+    """
+    checkpoint = Path(entry["checkpoint"])
     models = [f"ckpt:{checkpoint}"]
     if with_controls:
         models = [*grid.control_models, *models]
@@ -404,7 +490,8 @@ def eval_one(grid: Grid, entry: Mapping[str, Any], with_controls: bool, log: Log
     for task, body in results["tasks"].items():
         for model, record in body.get("models", {}).items():
             out.setdefault(model, {})[task] = record["metrics"]["auroc"]["point"]
-    return out
+    pooling = {name: spec.get("features", "") for name, spec in results["models"].items()}
+    return out, pooling
 
 
 def control_name(model: str, run: str) -> str:
@@ -470,19 +557,22 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
             if entry["done"] and not force:
                 log.say(f"skip {entry['run']} -- already in summary.json")
                 continue
-            log.say(
-                f"start {entry['run']}: {entry['steps']} steps x "
-                f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:,} tokens"
-            )
-            final = train_one(grid, entry, log)
-            log.say(f"trained {entry['run']} in {final['wall_s']:.0f}s")
+            if entry["reuse"]:
+                final = reuse_one(entry, log)
+            else:
+                log.say(
+                    f"start {entry['run']}: {entry['steps']} steps x "
+                    f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:,} tokens"
+                )
+                final = train_one(grid, entry, log)
+                log.say(f"trained {entry['run']} in {final['wall_s']:.0f}s")
             have = baselines_for(grid)
             controls_needed = entry["run"] in grid.control_runs and not all(
                 control_name(m, entry["run"]) in have for m in grid.control_models
             )
-            scored = eval_one(grid, entry, controls_needed, log)
+            scored, pooling = eval_one(grid, entry, controls_needed, log)
             baselines_for(grid, scored, entry["run"])
-            row = _row(entry, final, scored)
+            row = _row(entry, final, scored, pooling)
             payload["runs"] = [r for r in payload["runs"] if r["run"] != row["run"]] + [row]
             payload["baselines"] = baselines_for(grid)
             _write_summary(grid, payload)
@@ -495,13 +585,20 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
     return payload
 
 
-def _row(entry: Mapping[str, Any], final: Mapping[str, float], scored: Mapping) -> dict:
+def _row(
+    entry: Mapping[str, Any],
+    final: Mapping[str, float],
+    scored: Mapping,
+    pooling: Mapping[str, str] | None = None,
+) -> dict:
     name = entry["run"]
     matches = [k for k in scored if k.startswith("ckpt:")]
     auroc = dict(scored[matches[0]]) if matches else {}
     return {
         "run": name,
         "objective": entry["objective"],
+        "pooling": (pooling or {}).get(matches[0]) if matches else None,
+        "reuse_checkpoint": entry["checkpoint"] if entry["reuse"] else None,
         "target_mode": entry["target_mode"],
         "lambda_sigreg": entry["lambda_sigreg"],
         "p_future": entry["p_future"],
@@ -588,7 +685,8 @@ def render_summary(payload: Mapping[str, Any]) -> str:
         f"Base config `{payload.get('base', '')}`, source `{payload.get('source', '')}`, "
         f"held-out AUROC on a {meta.get('eval_subject_limit')}-subject subset "
         f"(seed {meta.get('eval_subject_seed')}), {meta.get('bootstrap')} bootstrap resamples, "
-        f"probe `{meta.get('probe_features')}@{meta.get('probe_layer')}`.",
+        f"probe `{meta.get('probe_features')}@{meta.get('probe_layer')}` "
+        f"(the `probe` column gives each row's resolved pooling).",
         "",
         f"Rows are appended by `scripts/ablate.py` as each run finishes. Last update: "
         f"{payload.get('updated', '')}.",
@@ -657,8 +755,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"summary {_short(grid.summary_json)}  log {_short(grid.log_path)}")
         total = 0
         for entry in entries:
-            state = "SKIP (done)" if entry["done"] and not args.force else "RUN"
-            total += 0 if entry["done"] and not args.force else entry["tokens"]
+            skip = entry["done"] and not args.force
+            state = "SKIP (done)" if skip else ("REUSE" if entry["reuse"] else "RUN")
+            total += 0 if skip or entry["reuse"] else entry["tokens"]
             print(
                 f"  {state:<11} {entry['run']:<18} {entry['steps']:>6} steps x "
                 f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:>12,} tokens  "

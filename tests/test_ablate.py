@@ -86,6 +86,83 @@ def test_dry_run_plan_resolves_every_cell_from_the_base_config(tmp_path: Path) -
     assert entries[1]["target_mode"] == "ema"
 
 
+def _finished_run(root: Path, name: str, *, kind: str = "jepa", steps: int = 2930) -> Path:
+    """A directory shaped like a finished cell: ``config.json``, ``metrics.csv``, ``final.pt``."""
+    out = root / name
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        json.dumps(
+            {
+                "data": {"max_len": 256},
+                "model": {"target_mode": "ema"},
+                "objective": {"kind": kind, "lambda_sigreg": 0.05},
+                "masking": {"p_future": 0.6},
+                "run": {"steps": steps, "batch_size": 64},
+            }
+        )
+    )
+    (out / "metrics.csv").write_text("step,loss,tokens_per_s\n1,9.0,100\n2,6.5,200\n")
+    (out / "final.pt").write_bytes(b"")
+    return out / "final.pt"
+
+
+def test_a_reused_checkpoint_is_planned_from_the_run_that_trained_it(tmp_path: Path) -> None:
+    """A ``reuse_checkpoint`` row describes the training that actually happened.
+
+    Steps, budget and the JEPA knobs come out of the other run's ``config.json``,
+    not out of this grid's base -- and the cell costs no tokens.
+    """
+    checkpoint = _finished_run(tmp_path / "elsewhere", "ar", kind="ar", steps=2930)
+    path = _grid_file(tmp_path)
+    raw = yaml.safe_load(path.read_text())
+    raw["runs"].append({"name": "ar_last", "reuse_checkpoint": str(checkpoint)})
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    entries = ablate.plan(ablate.load_grid(path))
+    reused = entries[-1]
+    assert reused["reuse"] is True
+    assert reused["checkpoint"] == str(checkpoint)
+    assert reused["out_dir"] == str(checkpoint.parent)
+    assert reused["steps"] == 2930
+    assert reused["tokens"] == 2930 * 64 * 256
+    assert reused["objective"] == "ar"
+    # An AR cell's JEPA columns stay blank even when read back from disk.
+    assert reused["target_mode"] is None and reused["p_future"] is None
+    assert entries[0]["reuse"] is False
+
+    # It is planned as REUSE and contributes nothing to the outstanding budget.
+    ablate.main([str(path), "--dry-run", "--only", "ar_last"])
+
+
+def test_a_reused_cell_costs_no_training_budget(tmp_path: Path, capsys) -> None:
+    checkpoint = _finished_run(tmp_path / "elsewhere", "jepa_ema")
+    path = _grid_file(tmp_path)
+    raw = yaml.safe_load(path.read_text())
+    raw["runs"] = [{"name": "jepa_ema_mean", "reuse_checkpoint": str(checkpoint)}]
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    ablate.main([str(path), "--dry-run"])
+    out = capsys.readouterr().out
+    assert "REUSE" in out
+    assert "total outstanding: 0 tokens" in out
+
+
+def test_a_reused_cell_may_not_also_carry_overrides(tmp_path: Path) -> None:
+    """Overrides are training knobs; a row that trains nothing must not pretend."""
+    path = tmp_path / "bad.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "base": "b",
+                "runs": [
+                    {"name": "a", "reuse_checkpoint": "runs/x/final.pt", "overrides": {"a.b": 1}}
+                ],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="overrides do nothing"):
+        ablate.load_grid(path)
+
+
 def test_a_per_run_budget_overrides_the_grid_default(tmp_path: Path) -> None:
     path = _grid_file(tmp_path)
     raw = yaml.safe_load(path.read_text())
@@ -209,6 +286,7 @@ def test_summary_markdown_has_a_row_per_run_and_a_column_per_task() -> None:
             {
                 "run": "ar",
                 "objective": "ar",
+                "pooling": "last@final",
                 "target_mode": None,
                 "lambda_sigreg": None,
                 "p_future": None,
@@ -220,6 +298,7 @@ def test_summary_markdown_has_a_row_per_run_and_a_column_per_task() -> None:
             {
                 "run": "jepa_ema",
                 "objective": "jepa",
+                "pooling": "mean@final",
                 "target_mode": "ema",
                 "lambda_sigreg": 0.05,
                 "p_future": 0.6,
@@ -238,5 +317,8 @@ def test_summary_markdown_has_a_row_per_run_and_a_column_per_task() -> None:
     # Blank JEPA knobs render as an em-dash placeholder, not as "None".
     assert "None" not in text
     assert "## Reference models" in text and "`gbm`" in text
+    # Every row says which pooling produced its AUROCs, because in one grid they
+    # differ: a causal arm is read at `last`, a bidirectional one at `mean`.
+    assert "last@final" in text and "mean@final" in text
     header, rule = text.splitlines()[6], text.splitlines()[7]
     assert header.count("|") == rule.count("|")
