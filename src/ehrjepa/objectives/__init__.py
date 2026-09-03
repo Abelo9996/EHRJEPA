@@ -14,3 +14,26 @@ the combined loss module exposing its components for logging, and diagnostic
 utilities (embedding rank, per-dimension variance) used to detect collapse
 during training.
 """
+
+from ehrjepa.data.masking import future_span_mask, multi_block_mask, sample_masks
+from ehrjepa.objectives.loss import (
+    JEPAObjective,
+    ObjectiveConfig,
+    collapse_diagnostics,
+    jepa_loss,
+)
+from ehrjepa.objectives.sigreg import SIGReg, epps_pulley, random_directions, sigreg
+
+__all__ = [
+    "JEPAObjective",
+    "ObjectiveConfig",
+    "SIGReg",
+    "collapse_diagnostics",
+    "epps_pulley",
+    "future_span_mask",
+    "jepa_loss",
+    "multi_block_mask",
+    "random_directions",
+    "sample_masks",
+    "sigreg",
+]
