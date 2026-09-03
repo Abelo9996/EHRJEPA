@@ -32,9 +32,20 @@ encoder carrying anything a probe would want:
    baseline reaches cosine 0.73 to the targets. The target encoder attends over
    the whole window, including the context the predictor was handed, so a target
    latent can contain what the predictor already has.
-4. **Pooling was costing the causal arm 2.5–3.3 AUROC points.** `last@final`
-   beats `cls_mean@final` on the AR checkpoint by that much, which is a fact
+4. **Pooling was reported to be costing the causal arm 2.5–3.3 AUROC points.**
+   `last@final` against `cls_mean@final` on the AR checkpoint, which is a fact
    about how the representation is read, not about how it was trained.
+
+   **That fourth figure did not survive re-measurement.** The pipeline test for
+   this grid re-scored the same `ar` checkpoint on the full seven-task,
+   3,000-subject held-out cut: `last` wins four tasks of seven, ranges from
+   −2.07 to +2.77 points, and averages **+0.17**. See
+   [the micro-grid README](../2026-09-03-microgrid2/README.md#one-thing-the-pipeline-test-found)
+   for the per-task table. The pooling default still changed, on the
+   architectural argument — a causal encoder's CLS row is a constant it cannot
+   reach, so half of its `cls_mean` vector carries nothing — but the *size* of
+   the effect is not what the diagnostic claimed, and rows 6 and 7 below exist so
+   that whatever it really is stays separable from the objective changes.
 
 ## The grid
 

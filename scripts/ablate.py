@@ -598,7 +598,7 @@ def _row(
         "run": name,
         "objective": entry["objective"],
         "pooling": (pooling or {}).get(matches[0]) if matches else None,
-        "reuse_checkpoint": entry["checkpoint"] if entry["reuse"] else None,
+        "reuse_checkpoint": _short(Path(entry["checkpoint"])) if entry["reuse"] else None,
         "target_mode": entry["target_mode"],
         "lambda_sigreg": entry["lambda_sigreg"],
         "p_future": entry["p_future"],

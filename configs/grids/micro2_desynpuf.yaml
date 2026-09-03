@@ -1,13 +1,15 @@
 # Pipeline test for the second pilot grid, not an experiment.
 #
 # Two runs of 100 steps each through the whole path grid 2 takes. The first cell
-# turns on *every* new objective flag at once -- a superset of any single cell in
-# `pilot2_desynpuf.yaml` -- because a cell that trains with all of them will
-# train with any subset, and the paths worth smoke-testing at scale are the two
-# that are not obviously cheap: the span-only target encoder's gather/scatter on
-# MPS, and the chunked reconstruction softmax's peak memory. The second cell
-# trains nothing at all: it re-scores the grid-1 `ar` checkpoint under the new
-# `auto` pooling, which is what exercises `reuse_checkpoint`.
+# turns on every flag any cell of `pilot2_desynpuf.yaml` uses, plus
+# `predictor.mask_token_time` -- a superset of every single cell there -- because
+# a cell that trains with all of them will train with any subset, and the paths
+# worth smoke-testing at scale are the two that are not obviously cheap: the
+# span-only target encoder's gather/scatter on MPS, and the chunked
+# reconstruction softmax's peak memory. (`objective.recon_value` is the one flag
+# not exercised here; grid 2 does not use it and it is covered by unit tests.)
+# The second cell trains nothing at all: it re-scores the grid-1 `ar` checkpoint
+# under the new `auto` pooling, which is what exercises `reuse_checkpoint`.
 #
 # 100 steps is 1,638,400 nominal token slots, 3.4% of a grid-2 cell's budget.
 # **The AUROCs are what a barely-initialised encoder scores.** Nothing about them
