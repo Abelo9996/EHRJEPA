@@ -19,6 +19,13 @@ and that ancestor is admitted to the vocabulary if the mass rolled into it clear
 ancestor only ever absorbs the mass of descendants that were themselves rejected;
 mass never gets counted at two levels at once.
 
+Two knobs bound the result. ``ndc_digits`` truncates every ``NDC`` code to its
+product segment *before* anything is counted -- the last two digits of an 11-digit
+NDC are the package size, which is not a clinical fact and which alone accounts
+for hundreds of thousands of distinct DE-SynPUF codes. ``max_vocab`` then caps the
+table: entries are demoted smallest-mass-first, each demotion handing its mass to
+its nearest surviving ancestor (or ``UNK``), until the cap is met.
+
 Quantizer
 ---------
 Values are per-code, so a raw float means nothing without its code. For every
@@ -32,6 +39,7 @@ mean/std are taken, which is most lab values and every count-like code.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -47,6 +55,7 @@ __all__ = [
     "CLS_ID",
     "DEFAULT_MIN_COUNT",
     "DEFAULT_MIN_VALUE_OBS",
+    "DEFAULT_NDC_DIGITS",
     "MASK_ID",
     "N_VALUE_BINS",
     "PAD_ID",
@@ -60,6 +69,7 @@ __all__ = [
     "fit_vocabulary",
     "load_quantizer",
     "main",
+    "normalize_code",
     "split_code",
 ]
 
@@ -76,6 +86,10 @@ DEFAULT_MIN_COUNT = 5
 
 #: A vocabulary entry needs this many train numeric observations for its own quantizer.
 DEFAULT_MIN_VALUE_OBS = 20
+
+#: NDC codes are truncated to this many digits before anything is counted. 9 is the
+#: labeler+product segment; digits 10-11 are the package size. ``0`` disables it.
+DEFAULT_NDC_DIGITS = 9
 
 #: ``value_bin`` is 0 for "no numeric value" and 1..10 for the deciles.
 N_VALUE_BINS = 10
@@ -109,6 +123,31 @@ def split_code(code: str) -> tuple[str, str, str] | None:
         sep = "/"
         head, found, tail = code.partition(sep)
     return (head, sep, tail) if found and head and tail else None
+
+
+def normalize_code(code: str, ndc_digits: int = DEFAULT_NDC_DIGITS) -> str:
+    """Canonicalise ``code`` before it is ever counted.
+
+    The only rule so far: an ``NDC`` code whose value is all digits is truncated to
+    its first ``ndc_digits`` characters. An 11-digit NDC is
+    ``labeler(5) + product(4) + package(2)``; the package segment distinguishes a
+    bottle of 30 from a bottle of 90, which is not a clinical distinction worth an
+    embedding row and which explodes the vocabulary (266,653 of DE-SynPUF's 288,274
+    distinct train codes are NDCs). Unlike the rollup in :func:`fit_vocabulary`,
+    this is *unconditional*: it happens whether or not the full code is frequent,
+    so the 11- and 9-digit forms can never both be in the table.
+
+    ``ndc_digits <= 0`` disables the truncation and returns ``code`` unchanged.
+    """
+    if ndc_digits <= 0:
+        return code
+    parts = split_code(code)
+    if parts is None:
+        return code
+    prefix, sep, value = parts
+    if prefix.upper() != "NDC" or not value.isdigit() or len(value) <= ndc_digits:
+        return code
+    return f"{prefix}{sep}{value[:ndc_digits]}"
 
 
 def _icd_ancestors(value: str) -> list[str]:
@@ -165,8 +204,14 @@ class Vocabulary:
     ``codes[i]`` is the string for id ``i``; ids 0-3 are :data:`SPECIAL_TOKENS`.
     ``train_count`` is the event mass routed to an entry (its own occurrences
     plus those of every descendant that rolled up into it), ``direct_count`` its
-    own literal occurrences, and ``is_ancestor`` marks entries that only exist
-    because of rollup (``direct_count < min_count``).
+    own literal occurrences *after* :func:`normalize_code`, and ``is_ancestor``
+    marks entries that only exist because of rollup
+    (``direct_count < min_count``, or demotion under ``max_vocab``).
+
+    ``ndc_digits`` is part of the mapping, not just of the fit: :meth:`resolve`
+    normalises before it looks anything up, so a vocabulary must be loaded with
+    the same value it was fitted with. :meth:`read` recovers it from the sibling
+    ``vocab.json`` when there is one.
     """
 
     codes: tuple[str, ...]
@@ -174,6 +219,7 @@ class Vocabulary:
     direct_count: tuple[int, ...]
     is_ancestor: tuple[bool, ...]
     min_count: int = DEFAULT_MIN_COUNT
+    ndc_digits: int = DEFAULT_NDC_DIGITS
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_index", {code: i for i, code in enumerate(self.codes)})
@@ -186,7 +232,12 @@ class Vocabulary:
         return self._index  # type: ignore[attr-defined]
 
     def resolve(self, code: str) -> tuple[int, str]:
-        """Map ``code`` to ``(id, kind)`` with ``kind`` in ``direct``/``ancestor``/``unk``."""
+        """Map ``code`` to ``(id, kind)`` with ``kind`` in ``direct``/``ancestor``/``unk``.
+
+        ``code`` is passed through :func:`normalize_code` first; NDC truncation is
+        therefore invisible to callers and never counts as a fallback.
+        """
+        code = normalize_code(code, self.ndc_digits)
         hit = self.index.get(code)
         if hit is not None:
             return hit, "direct"
@@ -214,7 +265,12 @@ class Vocabulary:
         self.to_frame().write_parquet(path)
 
     @classmethod
-    def from_frame(cls, frame: pl.DataFrame, min_count: int = DEFAULT_MIN_COUNT) -> Vocabulary:
+    def from_frame(
+        cls,
+        frame: pl.DataFrame,
+        min_count: int = DEFAULT_MIN_COUNT,
+        ndc_digits: int = DEFAULT_NDC_DIGITS,
+    ) -> Vocabulary:
         frame = frame.sort("code_id")
         return cls(
             codes=tuple(frame["code"].to_list()),
@@ -222,11 +278,35 @@ class Vocabulary:
             direct_count=tuple(frame["direct_count"].to_list()),
             is_ancestor=tuple(frame["is_ancestor"].to_list()),
             min_count=min_count,
+            ndc_digits=ndc_digits,
         )
 
     @classmethod
-    def read(cls, path: str | Path, min_count: int = DEFAULT_MIN_COUNT) -> Vocabulary:
-        return cls.from_frame(pl.read_parquet(path), min_count=min_count)
+    def read(
+        cls,
+        path: str | Path,
+        min_count: int = DEFAULT_MIN_COUNT,
+        ndc_digits: int | None = None,
+    ) -> Vocabulary:
+        """Read ``vocab.parquet``.
+
+        ``min_count`` and ``ndc_digits`` are fit parameters that the parquet does
+        not carry; when ``ndc_digits`` is ``None`` they are recovered from the
+        sibling ``vocab.json`` if it exists, so a cache built with a non-default
+        truncation resolves the way it was built.
+        """
+        path = Path(path)
+        summary_path = path.parent / "vocab.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text())
+            min_count = int(summary.get("min_count", min_count))
+            if ndc_digits is None:
+                ndc_digits = int(summary.get("ndc_digits", DEFAULT_NDC_DIGITS))
+        return cls.from_frame(
+            pl.read_parquet(path),
+            min_count=min_count,
+            ndc_digits=DEFAULT_NDC_DIGITS if ndc_digits is None else ndc_digits,
+        )
 
     def resolve_many(self, codes: Iterable[str]) -> pl.DataFrame:
         """Vectorised :meth:`resolve` over ``codes``, as a joinable frame.
@@ -245,16 +325,73 @@ class Vocabulary:
         )
 
 
+def _cap_vocabulary(
+    admitted: dict[str, int], parent: Mapping[str, str | None], budget: int
+) -> tuple[dict[str, int], int]:
+    """Demote entries smallest-mass-first until ``len(admitted) <= budget``.
+
+    Each demotion removes one entry and hands its whole mass to the nearest
+    *still-admitted* ancestor, or to ``UNK`` if the chain has none left. Demotion
+    never admits a new entry, so the size drops by exactly one per step and the
+    survivors are the top-``budget`` codes by mass at the moment each decision was
+    taken. Because a parent's mass grows as its children are demoted, "top-N by
+    train count" is resolved against the *current* mass, not the pre-rollup one --
+    which is the point: an ancestor earns its row from the children it absorbs.
+
+    Returns the capped table and the extra mass that fell through to ``UNK``.
+    """
+    unk_mass = 0
+    if len(admitted) <= budget:
+        return admitted, unk_mass
+    heap = [(mass, code) for code, mass in admitted.items()]
+    heapq.heapify(heap)
+    while len(admitted) > budget:
+        mass, code = heapq.heappop(heap)
+        current = admitted.get(code)
+        if current is None:
+            continue  # already demoted
+        if current != mass:
+            heapq.heappush(heap, (current, code))  # stale: absorbed a child since
+            continue
+        del admitted[code]
+        node = parent.get(code)
+        while node is not None and node not in admitted:
+            node = parent.get(node)
+        if node is None:
+            unk_mass += current
+        else:
+            admitted[node] += current
+            heapq.heappush(heap, (admitted[node], node))
+    return admitted, unk_mass
+
+
 def fit_vocabulary(
-    counts: Mapping[str, int], min_count: int = DEFAULT_MIN_COUNT
+    counts: Mapping[str, int],
+    min_count: int = DEFAULT_MIN_COUNT,
+    max_vocab: int | None = None,
+    ndc_digits: int = DEFAULT_NDC_DIGITS,
 ) -> tuple[Vocabulary, dict[str, float]]:
     """Fit a vocabulary from train code counts. Returns the vocabulary and coverage stats.
+
+    ``counts`` are raw code counts; they are folded through :func:`normalize_code`
+    first, so NDC package variants are merged before any threshold is applied.
 
     The rollup is one bottom-up sweep over the forest induced by :func:`ancestors`.
     Every node holds its own count plus the mass of its rejected children; if that
     total clears ``min_count`` the node is admitted and *keeps* the mass, otherwise
     the mass moves to its parent. Mass that falls off a root becomes ``UNK``.
+
+    ``max_vocab`` then caps the table *including* the four special tokens, by
+    demoting through the same ancestor chains (see :func:`_cap_vocabulary`).
     """
+    raw_counts = counts
+    if ndc_digits > 0:
+        folded: dict[str, int] = {}
+        for code, n in raw_counts.items():
+            key = normalize_code(code, ndc_digits)
+            folded[key] = folded.get(key, 0) + n
+        counts = folded
+
     parent: dict[str, str | None] = {}
     pending: dict[str, int] = dict(counts)
 
@@ -284,6 +421,11 @@ def fit_vocabulary(
         else:
             unk_mass += total
 
+    if max_vocab is not None:
+        budget = max(max_vocab - len(SPECIAL_TOKENS), 0)
+        admitted, capped_unk = _cap_vocabulary(admitted, parent, budget)
+        unk_mass += capped_unk
+
     order = sorted(admitted, key=lambda c: (-admitted[c], c))
     codes = list(SPECIAL_TOKENS) + order
     train_count = [0] * len(SPECIAL_TOKENS) + [admitted[c] for c in order]
@@ -297,6 +439,7 @@ def fit_vocabulary(
         direct_count=tuple(direct_count),
         is_ancestor=tuple(is_ancestor),
         min_count=min_count,
+        ndc_digits=ndc_digits,
     )
 
     total_events = sum(counts.values())
@@ -306,11 +449,14 @@ def fit_vocabulary(
     stats = {
         "train_events": total_events,
         "train_distinct_codes": len(counts),
+        "train_distinct_codes_raw": len(raw_counts),
         "vocab_size": len(vocab),
         "n_ancestor_entries": sum(is_ancestor),
         "direct_rate": routed["direct"] / total_events if total_events else 0.0,
         "ancestor_rate": routed["ancestor"] / total_events if total_events else 0.0,
         "unk_rate": routed["unk"] / total_events if total_events else 0.0,
+        "ndc_digits": ndc_digits,
+        "max_vocab": max_vocab,
     }
     return vocab, stats
 
@@ -485,11 +631,15 @@ def fit_tokenizer(
     meds_dir: str | Path,
     min_count: int = DEFAULT_MIN_COUNT,
     min_value_obs: int = DEFAULT_MIN_VALUE_OBS,
+    max_vocab: int | None = None,
+    ndc_digits: int = DEFAULT_NDC_DIGITS,
 ) -> tuple[Vocabulary, pl.DataFrame, dict[str, object]]:
     """Fit the vocabulary and quantizer on the train split of ``meds_dir``."""
     root = Path(meds_dir)
     counts = _train_code_counts(root)
-    vocab, vocab_stats = fit_vocabulary(counts, min_count=min_count)
+    vocab, vocab_stats = fit_vocabulary(
+        counts, min_count=min_count, max_vocab=max_vocab, ndc_digits=ndc_digits
+    )
     values = _train_values(root, vocab)
     quantizer = fit_quantizer(values, vocab, min_obs=min_value_obs)
     stats: dict[str, object] = {
@@ -560,6 +710,22 @@ def _decode_window(cache_dir: Path, split: str, n_events: int) -> str:
     return "\n".join(lines)
 
 
+def _add_vocab_shape_args(parser: argparse.ArgumentParser) -> None:
+    """The two knobs that bound vocabulary size, shared by ``fit`` and ``build``."""
+    parser.add_argument(
+        "--ndc-digits",
+        type=int,
+        default=DEFAULT_NDC_DIGITS,
+        help="truncate NDC codes to this many digits before counting (0 disables)",
+    )
+    parser.add_argument(
+        "--max-vocab",
+        type=int,
+        default=None,
+        help="cap the vocabulary (specials included); the rest roll up through ancestors",
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m ehrjepa.data.tokenize",
@@ -572,12 +738,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     fit.add_argument("--out", type=Path, required=True, help="cache directory to write into")
     fit.add_argument("--min-count", type=int, default=DEFAULT_MIN_COUNT)
     fit.add_argument("--min-value-obs", type=int, default=DEFAULT_MIN_VALUE_OBS)
+    _add_vocab_shape_args(fit)
 
     build = sub.add_parser("build", help="fit, then tensorize every split")
     build.add_argument("meds_dir", type=Path)
     build.add_argument("--cache", type=Path, required=True)
     build.add_argument("--min-count", type=int, default=DEFAULT_MIN_COUNT)
     build.add_argument("--min-value-obs", type=int, default=DEFAULT_MIN_VALUE_OBS)
+    _add_vocab_shape_args(build)
     build.add_argument("--splits", nargs="+", default=list(SPLITS))
 
     inspect = sub.add_parser("inspect", help="print cache metadata and decoded example windows")
@@ -588,7 +756,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "fit":
         vocab, quantizer, stats = fit_tokenizer(
-            args.meds_dir, min_count=args.min_count, min_value_obs=args.min_value_obs
+            args.meds_dir,
+            min_count=args.min_count,
+            min_value_obs=args.min_value_obs,
+            max_vocab=args.max_vocab,
+            ndc_digits=args.ndc_digits,
         )
         write_fit(args.out, vocab, quantizer, stats)
         print(json.dumps({"cache_dir": str(args.out), **stats}, indent=2, default=str))
@@ -602,6 +774,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.cache,
             min_count=args.min_count,
             min_value_obs=args.min_value_obs,
+            max_vocab=args.max_vocab,
+            ndc_digits=args.ndc_digits,
             splits=args.splits,
         )
         print(json.dumps(meta, indent=2, default=str))

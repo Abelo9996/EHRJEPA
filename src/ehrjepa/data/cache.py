@@ -51,6 +51,7 @@ from ehrjepa.data.canonical import SPLITS
 from ehrjepa.data.tokenize import (
     DEFAULT_MIN_COUNT,
     DEFAULT_MIN_VALUE_OBS,
+    DEFAULT_NDC_DIGITS,
     N_VALUE_BINS,
     TOKENIZER_VERSION,
     Z_CLIP,
@@ -240,6 +241,8 @@ def build_cache(
     cache_dir: str | Path,
     min_count: int = DEFAULT_MIN_COUNT,
     min_value_obs: int = DEFAULT_MIN_VALUE_OBS,
+    max_vocab: int | None = None,
+    ndc_digits: int = DEFAULT_NDC_DIGITS,
     splits: Sequence[str] = SPLITS,
 ) -> dict[str, object]:
     """Fit the tokenizer on train, tensorize every split, and write ``meta.json``."""
@@ -247,7 +250,11 @@ def build_cache(
     root = Path(meds_dir)
     out = Path(cache_dir)
     vocab, quantizer, fit_stats = fit_tokenizer(
-        root, min_count=min_count, min_value_obs=min_value_obs
+        root,
+        min_count=min_count,
+        min_value_obs=min_value_obs,
+        max_vocab=max_vocab,
+        ndc_digits=ndc_digits,
     )
     write_fit(out, vocab, quantizer, fit_stats)
 

@@ -32,7 +32,9 @@ from ehrjepa.data.tokenize import (
     fit_quantizer,
     fit_tokenizer,
     fit_vocabulary,
+    normalize_code,
     split_code,
+    write_fit,
 )
 
 BIRTH = "MEDS_BIRTH"
@@ -576,3 +578,106 @@ def test_fit_is_train_only(tmp_path: Path) -> None:
     assert vocab.resolve("TUNING_ONLY//x") == (UNK_ID, "unk")
     assert stats["train_events"] == 10
     assert quantizer.height == len(vocab)
+
+
+# --------------------------------------------------------------------------- #
+# NDC normalization and the vocabulary cap
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("code", "digits", "expected"),
+    [
+        ("NDC//12345678901", 9, "NDC//123456789"),
+        ("NDC/12345678901", 9, "NDC/123456789"),  # single-slash MIMIC form
+        ("NDC//12345678901", 5, "NDC//12345"),
+        ("NDC//12345678901", 0, "NDC//12345678901"),  # disabled
+        ("NDC//123456789", 9, "NDC//123456789"),  # already short enough
+        ("NDC//12345", 9, "NDC//12345"),
+        ("NDC//ABC12345678", 9, "NDC//ABC12345678"),  # not all digits
+        ("ICD9CM//250.01", 9, "ICD9CM//250.01"),  # other prefixes untouched
+        ("MEDS_BIRTH", 9, "MEDS_BIRTH"),  # no separator
+    ],
+)
+def test_normalize_code_truncates_only_ndc(code: str, digits: int, expected: str) -> None:
+    assert normalize_code(code, digits) == expected
+
+
+def test_ndc_package_variants_merge_before_counting() -> None:
+    """Three package sizes of one product become one entry with the summed mass."""
+    counts = {"NDC//12345678901": 4, "NDC//12345678902": 4, "NDC//12345678903": 4}
+    # Unfolded, each variant is below min_count 5 and only survives as *rollup*
+    # mass on an ancestor entry that no event ever carried directly.
+    unfolded, unfolded_stats = fit_vocabulary(counts, min_count=5, ndc_digits=0)
+    parent = unfolded.index["NDC//123456789"]
+    assert unfolded.is_ancestor[parent] and unfolded.direct_count[parent] == 0
+    assert unfolded_stats["ancestor_rate"] == pytest.approx(1.0)
+    # Folded, the product code holds the same 12 events as a direct entry.
+    folded, stats = fit_vocabulary(counts, min_count=5, ndc_digits=9)
+    code_id = folded.index["NDC//123456789"]
+    assert folded.train_count[code_id] == 12
+    assert folded.direct_count[code_id] == 12
+    assert not folded.is_ancestor[code_id]
+    assert stats["unk_rate"] == 0.0
+    # And resolve() normalizes, so the raw 11-digit code lands there directly.
+    assert folded.resolve("NDC//12345678902") == (code_id, "direct")
+
+
+def test_max_vocab_caps_the_table_and_conserves_mass() -> None:
+    counts = {f"ICD9CM//{i:03d}.{j}": 10 + i for i in range(40) for j in range(5)}
+    uncapped, _ = fit_vocabulary(counts, min_count=5)
+    assert len(uncapped) > 60
+
+    capped, stats = fit_vocabulary(counts, min_count=5, max_vocab=60)
+    assert len(capped) == 60 == stats["vocab_size"]
+    # Every event still lands somewhere, and the total mass is preserved.
+    total = sum(counts.values())
+    assert sum(capped.train_count) == total
+    routed = sum(stats[f"{kind}_rate"] for kind in ("direct", "ancestor", "unk"))
+    assert routed == pytest.approx(1.0)
+
+
+def test_max_vocab_keeps_the_heaviest_entries() -> None:
+    counts = {f"HCPCS//{i:04d}": (i + 1) * 100 for i in range(50)}
+    capped, _ = fit_vocabulary(counts, min_count=5, max_vocab=14)
+    kept = [c for c in capped.codes if c not in SPECIAL_TOKENS and c != "HCPCS"]
+    # The ten heaviest raw codes are the ones with the largest index.
+    assert set(kept) >= {f"HCPCS//{i:04d}" for i in range(46, 50)}
+    assert not any(c in kept for c in (f"HCPCS//{i:04d}" for i in range(5)))
+
+
+def test_max_vocab_below_the_special_tokens_leaves_only_specials() -> None:
+    counts = {"ICD9CM//250.01": 100, "ICD9CM//250.02": 100}
+    capped, stats = fit_vocabulary(counts, min_count=5, max_vocab=4)
+    assert list(capped.codes) == list(SPECIAL_TOKENS)
+    assert stats["unk_rate"] == pytest.approx(1.0)
+    assert capped.train_count[UNK_ID] == 200
+
+
+def test_vocabulary_read_recovers_ndc_digits_from_vocab_json(tmp_path: Path) -> None:
+    counts = {"NDC//12345678901": 40, "NDC//12345678902": 40}
+    vocab, stats = fit_vocabulary(counts, min_count=5, ndc_digits=5)
+    write_fit(tmp_path, vocab, pl.DataFrame({"code_id": [0]}), stats)
+    reloaded = Vocabulary.read(tmp_path / "vocab.parquet")
+    assert reloaded.ndc_digits == 5
+    assert reloaded.resolve("NDC//12345678901")[1] == "direct"
+
+
+def test_build_cache_threads_max_vocab_and_ndc_digits(tmp_path: Path) -> None:
+    start = dt.datetime(1980, 1, 1)
+    rows = [(1, start, BIRTH, None)]
+    for i in range(60):
+        when = start + dt.timedelta(days=400 + i)
+        # 60 distinct 11-digit NDCs across 6 products, plus a spread of ICD codes.
+        rows.append((1, when, f"NDC//0000351{i // 10}{i % 10:03d}", 30.0))
+        rows.append((1, when, f"ICD9CM//{250 + i % 12}.{i % 4}", None))
+    frame = _frame(rows)
+    meds_dir = _write_meds(tmp_path / "meds", {"train": frame, "tuning": frame.clear()})
+    meta = build_cache(
+        meds_dir, tmp_path / "cache", max_vocab=12, ndc_digits=9, splits=("train", "tuning")
+    )
+    assert meta["vocab_size"] == 12
+    assert meta["fit"]["max_vocab"] == 12
+    assert meta["fit"]["ndc_digits"] == 9
+    vocab = Vocabulary.read(tmp_path / "cache" / "vocab.parquet")
+    assert len(vocab) == 12 and vocab.ndc_digits == 9

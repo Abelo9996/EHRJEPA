@@ -142,7 +142,23 @@ and flagged `has_birth = false`, so a model can learn not to trust their ages.
 Events with identical timestamps get `log_delta = 0` and keep their parquet
 order.
 
-## Vocabulary: rollup before UNK
+## Vocabulary: normalize, then roll up, then cap
+
+### 1. Normalization (unconditional)
+
+Before anything is counted, `NDC//<digits>` is truncated to its first
+`--ndc-digits` characters (default 9). An 11-digit NDC is
+`labeler(5) + product(4) + package(2)`; the package segment says whether the
+bottle held 30 tablets or 90, which is not a fact the encoder should spend an
+embedding row on. It is also, numerically, the whole problem: 266,653 of
+DE-SynPUF's 288,274 distinct train codes are NDCs, and folding them to 9 digits
+leaves 138,443 distinct codes. Unlike rollup this is not conditional on
+frequency, so the 11- and 9-digit forms can never both hold ids.
+`--ndc-digits 0` turns it off. The value is recorded in `vocab.json` and
+`Vocabulary.read` picks it back up, because `resolve()` has to normalize the same
+way the fit did.
+
+### 2. Rollup before UNK
 
 Ids 0-3 are `[PAD]`, `[UNK]`, `[CLS]`, `[MASK]`. A code with at least
 `--min-count` (default 5) train occurrences gets its own id. A rarer code is not
@@ -152,7 +168,7 @@ truncated towards an ancestor that is frequent enough to be worth an embedding.
 | prefix | chain |
 |---|---|
 | `ICD9*`, `ICD10*` | strip one character at a time: `ICD9CM/250.01` → `250.0` → `250` → `25` → `2` (a trailing `.` goes with the character that exposed it) |
-| `NDC//<digits>` | 11-digit code → first 9 (product) → first 5 (labeler) |
+| `NDC//<digits>` | 9-digit product code (post-normalization) → first 5 (labeler) |
 | `HCPCS//<code>` | first 3 characters |
 | anything else | the bare `PREFIX` (e.g. `LOINC`) |
 
@@ -162,6 +178,21 @@ keeps that mass if it clears `min_count` or hands it to its parent if it does
 not. Mass is therefore never counted at two levels at once, and an ancestor is
 only admitted if the codes that actually need it are frequent enough together.
 Entries admitted this way carry `is_ancestor = true`.
+
+### 3. The cap
+
+`--max-vocab N` bounds the table at `N` rows, specials included. Entries are
+demoted smallest-mass-first; each demotion removes exactly one row and hands its
+whole mass to the nearest *still-admitted* ancestor, or to `[UNK]` when the chain
+has none left. Demotion never admits a new row, so the survivors are the top
+`N - 4` codes by the mass they hold at the moment each decision is taken —
+mass, not raw frequency, because an ancestor earns its row from the children it
+absorbs.
+
+DE-SynPUF at `--max-vocab 30000`: vocabulary 30,000 (from 252,935 uncapped),
+UNK rate 0.0 on every split, fallback-to-ancestor rate 16.2% train / 16.3%
+tuning / 16.5% held_out. Nothing reaches `[UNK]` because every DE-SynPUF code
+has a `PREFIX` in the table to fall back to.
 
 ## Value quantizer
 
@@ -192,8 +223,8 @@ No device logic lives in the dataset; tensors come out on CPU.
 ```
 python -m ehrjepa.data.etl {mimic,desynpuf,synthea} --input <dir> --output <dir> [--shard-size N] [--work-dir D]
 python -m ehrjepa.data.stats <meds_dir> [--top-k K] [--json]
-python -m ehrjepa.data.tokenize fit <meds_dir> --out <cache_dir> [--min-count 5] [--min-value-obs 20]
-python -m ehrjepa.data.tokenize build <meds_dir> --cache <cache_dir> [--min-count 5]
+python -m ehrjepa.data.tokenize fit <meds_dir> --out <cache_dir> [--min-count 5] [--min-value-obs 20] [--ndc-digits 9] [--max-vocab N]
+python -m ehrjepa.data.tokenize build <meds_dir> --cache <cache_dir> [--min-count 5] [--ndc-digits 9] [--max-vocab N]
 python -m ehrjepa.data.tokenize inspect <cache_dir> [--events 12]
 ```
 
