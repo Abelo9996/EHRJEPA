@@ -25,6 +25,7 @@ dependencies = [
   "pyarrow>=16.0",
   "pyyaml>=6.0",
   "scikit-learn>=1.4",
+  "scipy>=1.11",
   # meds is the MEDS schema package; 0.4.x is the current schema revision.
   # meds_etl caps its own meds dependency (0.3.2 allows meds<=0.4, and every
   # later meds_etl release pins meds==0.3.3), so meds 0.4.0 + meds_etl 0.3.2 is
@@ -35,6 +36,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Downstream evaluation (ehrjepa.eval): ACES evaluates the task YAMLs in
+# configs/tasks/, xgboost is the gradient-boosting baseline.
+eval = [
+  "es-aces>=0.7,<0.8",
+  "xgboost>=2.0",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
