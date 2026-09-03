@@ -45,6 +45,48 @@ def test_shipped_configs_load_and_have_the_documented_shape() -> None:
     assert debug.run.steps == 50
 
 
+def test_objective_shape_sections_default_to_the_shipped_behaviour() -> None:
+    """``predictor``/``target``/``train`` exist, default to off, and reach the model."""
+    debug = load_config(DEBUG_CONFIG)
+    assert debug.predictor.mask_token_time is True
+    assert debug.target.time_features is True
+    assert debug.target.span_only is False
+    assert debug.train.time_feature_dropout == 0.0
+    assert debug.objective.lambda_recon == 0.0
+
+    model = debug.model_config(vocab_size=101)
+    assert model.mask_token_time is True
+    assert (model.target_time_features, model.target_span_only) == (True, False)
+    assert (model.recon_head, model.recon_value_head) == (False, False)
+
+
+def test_objective_shape_sections_fold_into_the_model_config() -> None:
+    """One place to set each flag, and a checkpoint records what it was set to."""
+    config = load_config(
+        DEBUG_CONFIG,
+        [
+            "predictor.mask_token_time=false",
+            "target.time_features=false",
+            "target.span_only=true",
+            "train.time_feature_dropout=0.3",
+            "objective.lambda_recon=0.1",
+            "objective.recon_value=true",
+        ],
+    )
+    model = config.model_config(vocab_size=101)
+    assert model.mask_token_time is False
+    assert model.target_time_features is False
+    assert model.target_span_only is True
+    assert model.time_feature_dropout == pytest.approx(0.3)
+    assert model.recon_head is True and model.recon_value_head is True
+    # The sections round-trip into the payload a checkpoint stores.
+    assert config.to_dict()["target"] == {"time_features": False, "span_only": True}
+
+    # No reconstruction weight, no head, even if the value flag is set.
+    without = load_config(DEBUG_CONFIG, ["objective.recon_value=true"]).model_config(101)
+    assert without.recon_head is False and without.recon_value_head is False
+
+
 def test_overrides_are_parsed_as_yaml_scalars() -> None:
     raw = {"run": {"steps": 2000}}
     apply_overrides(raw, ["run.steps=5", "optim.lr=1e-5", "run.tensorboard=false", "model.dim=64"])
@@ -112,10 +154,29 @@ def test_five_step_run_on_the_debug_config_is_fast_and_logs(tmp_path: Path) -> N
     assert final["step"] == 5
     assert final["pred_loss"] > 0
     rows = (tmp_path / "metrics.csv").read_text().strip().splitlines()
-    assert rows[0].startswith("step,loss,pred_loss,sigreg_tokens,sigreg_cls,ce,top1,top10,lr")
+    assert rows[0].startswith(
+        "step,loss,pred_loss,sigreg_tokens,sigreg_cls,recon_loss,recon_value_loss,ce,top1,top10,lr"
+    )
     assert len(rows) >= 2
     assert (tmp_path / "final.pt").exists()
     assert (tmp_path / "config.json").exists()
+
+
+@requires_cache
+def test_the_default_objective_reproduces_its_recorded_loss(tmp_path: Path) -> None:
+    """A checksum on the shipped defaults, to the last bit of a float32.
+
+    Every knob added for the second pilot grid defaults to the behaviour this
+    number was produced by -- no extra RNG draw, no reordered addition, no head
+    that exists but contributes zero. If this moves, an existing run no longer
+    reproduces, and that has to be a deliberate decision rather than a surprise.
+    """
+    final = _trainer(tmp_path, steps=5).train()
+    assert final["loss"] == pytest.approx(0.46185019612312317, abs=0.0)
+    assert final["pred_loss"] == pytest.approx(0.42000460624694824, abs=0.0)
+    assert final["sigreg_tokens"] == pytest.approx(0.3700316250324249, abs=0.0)
+    assert final["sigreg_cls"] == pytest.approx(0.4668799340724945, abs=0.0)
+    assert final["recon_loss"] == 0.0 and final["recon_value_loss"] == 0.0
 
 
 @requires_cache

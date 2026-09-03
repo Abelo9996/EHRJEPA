@@ -12,7 +12,14 @@ import math
 import pytest
 import torch
 
-from ehrjepa.objectives.loss import collapse_diagnostics, jepa_loss
+from ehrjepa.data.masking import sample_masks
+from ehrjepa.models import EHRJEPA, EHRJEPAConfig
+from ehrjepa.objectives.loss import (
+    JEPAObjective,
+    ObjectiveConfig,
+    collapse_diagnostics,
+    jepa_loss,
+)
 from ehrjepa.objectives.sigreg import epps_pulley, random_directions, sigreg
 
 
@@ -132,3 +139,100 @@ def test_collapse_diagnostics_separate_collapse_from_structure() -> None:
     # Predicting your own target is the maximum cosine gap available.
     assert a["cos_gap"] > 0.5
     assert abs(b["cos_gap"]) < 0.5
+
+
+# --------------------------------------------------------------------------- #
+# The auxiliary reconstruction term
+# --------------------------------------------------------------------------- #
+
+_RECON_VOCAB = 48
+
+
+def _recon_model(**overrides) -> EHRJEPA:
+    values = dict(
+        vocab_size=_RECON_VOCAB,
+        dim=32,
+        depth=2,
+        heads=4,
+        pred_dim=16,
+        pred_depth=2,
+        pred_heads=2,
+        dropout=0.0,
+        n_freq=8,
+        target_mode="ema",
+    )
+    values.update(overrides)
+    return EHRJEPA(EHRJEPAConfig(**values))
+
+
+def _recon_batch(batch: int = 4, length: int = 32) -> dict[str, torch.Tensor]:
+    g = torch.Generator().manual_seed(11)
+    return {
+        "code_id": torch.randint(1, _RECON_VOCAB, (batch, length), generator=g),
+        "value_bin": torch.randint(0, 11, (batch, length), generator=g),
+        "value_z": torch.randn(batch, length, generator=g),
+        "age": torch.rand(batch, length, generator=g) * 90,
+        "log_delta": torch.rand(batch, length, generator=g) * 8,
+        "attention_mask": torch.ones(batch, length, dtype=torch.long),
+    }
+
+
+def test_reconstruction_is_off_and_costs_nothing_by_default() -> None:
+    """No head, no term, no key missing from the logged row."""
+    model = _recon_model()
+    assert model.recon_head is None and model.recon_value_head is None
+    assert not any("recon" in name for name in model.state_dict())
+
+    batch = _recon_batch()
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(3)
+    )
+    losses = JEPAObjective(ObjectiveConfig())(model(batch, context, target))
+    assert float(losses["recon_loss"]) == 0.0
+    assert float(losses["recon_value_loss"]) == 0.0
+
+
+def test_reconstruction_loss_falls_on_a_memorizable_batch() -> None:
+    """One batch, over and over: the code CE must come down off ``log(vocab)``.
+
+    This is the cheapest evidence that the term is wired to something that can
+    learn -- the head reads the predictor's output, which carries gradient, and
+    the targets are that batch's own codes.
+    """
+    torch.manual_seed(0)
+    model = _recon_model(recon_head=True, recon_value_head=True).train()
+    objective = JEPAObjective(
+        ObjectiveConfig(lambda_sigreg=0.0, lambda_recon=1.0, recon_value=True),
+        recon_head=model.recon_head,
+        recon_value_head=model.recon_value_head,
+    )
+    batch = _recon_batch()
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(3)
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-3)
+
+    history = []
+    for _ in range(60):
+        losses = objective(model(batch, context, target))
+        optimizer.zero_grad(set_to_none=True)
+        losses["loss"].backward()
+        optimizer.step()
+        history.append((float(losses["recon_loss"]), float(losses["recon_value_loss"])))
+
+    first_code, first_value = history[0]
+    last_code, last_value = history[-1]
+    assert first_code == pytest.approx(math.log(_RECON_VOCAB), abs=0.6)
+    assert last_code < first_code - 1.0, history[:: len(history) // 4]
+    assert last_value < first_value - 0.1
+
+
+def test_reconstruction_head_is_tied_and_not_double_counted() -> None:
+    """The head reuses the code table; the objective must not register it twice."""
+    model = _recon_model(recon_head=True)
+    assert model.recon_head is not None
+    assert model.recon_head.weight is model.embed.code_emb.weight
+    objective = JEPAObjective(ObjectiveConfig(lambda_recon=0.1), recon_head=model.recon_head)
+    assert list(objective.parameters()) == []
+    keys = [k for k in model.state_dict() if "recon_head" in k]
+    assert keys == ["recon_head.bias", "recon_head.norm.weight", "recon_head.norm.bias"]

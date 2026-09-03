@@ -1,9 +1,17 @@
 """Typed configuration for pretraining: plain YAML in, dataclasses out.
 
-No hydra. A config file is a mapping of five sections -- ``data``, ``model``,
-``objective``, ``masking``, ``optim``, ``run`` -- each of which maps onto one
-dataclass, and every key is checked against the dataclass fields, so a typo is an
-error at load time rather than a silently ignored setting.
+No hydra. A config file is a mapping of sections -- ``data``, ``model``,
+``predictor``, ``target``, ``objective``, ``masking``, ``optim``, ``train``,
+``run`` -- each of which maps onto one dataclass, and every key is checked
+against the dataclass fields, so a typo is an error at load time rather than a
+silently ignored setting.
+
+``predictor``, ``target`` and ``train`` are three small sections that name the
+*objective's* shape rather than the network's, and each is folded into
+:class:`~ehrjepa.models.jepa.EHRJEPAConfig` by :meth:`PretrainConfig.model_config`
+so that a checkpoint records them and the probe rebuilds the same model. They are
+where they are because "does the mask token carry time" is a question about the
+prediction task, not about how wide the predictor is.
 
 ``--override key=value`` uses dotted paths (``optim.lr=1e-4``,
 ``model.depth=8``); values are parsed as YAML scalars, so ``true``, ``3``,
@@ -26,8 +34,11 @@ __all__ = [
     "DataConfig",
     "MaskingConfig",
     "OptimConfig",
+    "PredictorConfig",
     "PretrainConfig",
     "RunConfig",
+    "TargetConfig",
+    "TrainConfig",
     "apply_overrides",
     "load_config",
 ]
@@ -65,6 +76,39 @@ class MaskingConfig:
 
 
 @dataclass
+class PredictorConfig:
+    """What the predictor's mask tokens are made of."""
+
+    #: Mask tokens carry the target's ``age`` and ``log_delta``. With this off a
+    #: mask token is the learned ``MASK`` embedding plus RoPE at the target index
+    #: and nothing else, so no time-conditional prior can stand in for the
+    #: prediction.
+    mask_token_time: bool = True
+
+
+@dataclass
+class TargetConfig:
+    """What the target encoder is shown."""
+
+    #: The target encoder's input carries the time terms. Off, targets are
+    #: content -- code and value only.
+    time_features: bool = True
+    #: Run the target encoder on the target span alone rather than on the full
+    #: window, so a target latent cannot absorb the context.
+    span_only: bool = False
+
+
+@dataclass
+class TrainConfig:
+    """Input augmentation applied on the online (gradient-carrying) pass."""
+
+    #: Per-token probability that both time terms are dropped from the online
+    #: encoder's input, so the shared or EMA-copied weights have seen inputs
+    #: shaped like the content-only ones ``target.time_features: false`` makes.
+    time_feature_dropout: float = 0.0
+
+
+@dataclass
 class OptimConfig:
     lr: float = 3e-4
     weight_decay: float = 0.05
@@ -97,33 +141,54 @@ class RunConfig:
 class PretrainConfig:
     data: DataConfig = field(default_factory=DataConfig)
     model: dict[str, Any] = field(default_factory=dict)
+    predictor: PredictorConfig = field(default_factory=PredictorConfig)
+    target: TargetConfig = field(default_factory=TargetConfig)
     objective: ObjectiveConfig = field(default_factory=ObjectiveConfig)
     masking: MaskingConfig = field(default_factory=MaskingConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
+    train: TrainConfig = field(default_factory=TrainConfig)
     run: RunConfig = field(default_factory=RunConfig)
 
     def model_config(self, vocab_size: int) -> EHRJEPAConfig:
-        """Resolve the model section, defaulting ``vocab_size`` to the cache's."""
+        """Resolve the model section, defaulting ``vocab_size`` to the cache's.
+
+        The ``predictor``/``target``/``train`` sections and the two
+        reconstruction knobs are folded in here and win over anything of the same
+        name written under ``model``: there is one place to set each of them, and
+        it is the section named after the thing it changes.
+        """
         values = coerce_section(EHRJEPAConfig, self.model, "model")
         values.setdefault("vocab_size", vocab_size)
+        values["mask_token_time"] = self.predictor.mask_token_time
+        values["target_time_features"] = self.target.time_features
+        values["target_span_only"] = self.target.span_only
+        values["time_feature_dropout"] = self.train.time_feature_dropout
+        values["recon_head"] = self.objective.lambda_recon != 0.0
+        values["recon_value_head"] = values["recon_head"] and self.objective.recon_value
         return EHRJEPAConfig.from_mapping(values)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "data": asdict(self.data),
             "model": dict(self.model),
+            "predictor": asdict(self.predictor),
+            "target": asdict(self.target),
             "objective": asdict(self.objective),
             "masking": asdict(self.masking),
             "optim": asdict(self.optim),
+            "train": asdict(self.train),
             "run": asdict(self.run),
         }
 
 
 _SECTIONS: dict[str, type] = {
     "data": DataConfig,
+    "predictor": PredictorConfig,
+    "target": TargetConfig,
     "objective": ObjectiveConfig,
     "masking": MaskingConfig,
     "optim": OptimConfig,
+    "train": TrainConfig,
     "run": RunConfig,
 }
 

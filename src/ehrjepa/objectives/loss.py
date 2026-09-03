@@ -19,6 +19,14 @@ can produce perfectly isotropic token outputs while every subject embedding land
 in the same place.
 
 ``lambda_sigreg`` defaults to 0.05, the value LeJEPA reports as a robust default.
+
+``lambda_recon`` adds a third term, off by default: cross-entropy from the
+predictor's output at each target position to that event's ``code_id``, through
+the tied code-embedding table (the AR next-code head, reused verbatim, applied
+one step off its usual place). It is an auxiliary that forces the predicted
+latent to carry code identity, which the first pilot grid's probes said the JEPA
+encoders were discarding. ``recon_value`` adds the same for the 11-way
+``value_bin``. Both are logged separately from the prediction loss.
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ehrjepa.models.jepa import JEPAOutput
+from ehrjepa.objectives.ar import ar_loss_chunked
 from ehrjepa.objectives.sigreg import DEFAULT_N_DIRECTIONS, SIGReg
 
 __all__ = ["JEPAObjective", "ObjectiveConfig", "collapse_diagnostics", "jepa_loss"]
@@ -73,6 +82,11 @@ class ObjectiveConfig:
     sigreg_t_max: float = 5.0
     sigreg_sigma: float = 1.0
     sigreg_scale_by_n: bool = False
+    #: Weight on the auxiliary code-reconstruction cross-entropy. ``0.0`` builds
+    #: no head at all, so a run that leaves it alone is byte-identical.
+    lambda_recon: float = 0.0
+    #: Add an 11-way ``value_bin`` head alongside it, at the same weight.
+    recon_value: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in OBJECTIVE_KINDS:
@@ -88,11 +102,23 @@ class ObjectiveConfig:
 
 
 class JEPAObjective(nn.Module):
-    """Combine the prediction loss and the two SIGReg terms."""
+    """Combine the prediction loss, the two SIGReg terms and the auxiliary heads.
 
-    def __init__(self, config: ObjectiveConfig | None = None) -> None:
+    ``recon_head``/``recon_value_head`` are the model's own modules. They are kept
+    in a plain list rather than assigned as submodules on purpose: registering
+    them here would put the same parameters in two ``state_dict``\\ s and twice in
+    the optimizer's weight-decay bookkeeping.
+    """
+
+    def __init__(
+        self,
+        config: ObjectiveConfig | None = None,
+        recon_head: nn.Module | None = None,
+        recon_value_head: nn.Module | None = None,
+    ) -> None:
         super().__init__()
         self.config = config or ObjectiveConfig()
+        self._heads = [recon_head, recon_value_head]
         self.sigreg = SIGReg(
             n_directions=self.config.sigreg_directions,
             max_rows=self.config.sigreg_max_rows,
@@ -119,13 +145,40 @@ class JEPAObjective(nn.Module):
         else:
             sig_tokens = self.sigreg(rows.float())
             sig_cls = self.sigreg(output.cls.float())
+        recon, recon_value = self.reconstruction(output)
         total = pred_loss + cfg.lambda_sigreg * (sig_tokens + sig_cls)
+        if cfg.lambda_recon != 0.0:
+            total = total + cfg.lambda_recon * (recon + recon_value)
         return {
             "loss": total,
             "pred_loss": pred_loss.detach(),
             "sigreg_tokens": sig_tokens.detach(),
             "sigreg_cls": sig_cls.detach(),
+            "recon_loss": recon.detach(),
+            "recon_value_loss": recon_value.detach(),
         }
+
+    def reconstruction(self, output: JEPAOutput) -> tuple[Tensor, Tensor]:
+        """``(code CE, value_bin CE)`` from the predicted latents, or two zeros.
+
+        The code head is applied through :func:`~ehrjepa.objectives.ar.ar_loss_chunked`
+        for the same reason the AR run is: a ``(n_targets, 30000)`` logit tensor
+        and its gradient do not belong on a 16 GB laptop.
+        """
+        zero = output.predictions.new_zeros(())
+        head, value_head = self._heads
+        if self.config.lambda_recon == 0.0 or output.predictions.shape[0] == 0:
+            return zero, zero
+        recon, recon_value = zero, zero
+        codes = output.extras.get("recon_code_id")
+        if head is not None and codes is not None:
+            recon = ar_loss_chunked(
+                head, output.predictions, codes, chunk=self.config.ar_chunk, top_k=(1,)
+            )["loss"]
+        bins = output.extras.get("recon_value_bin")
+        if value_head is not None and bins is not None:
+            recon_value = F.cross_entropy(value_head(output.predictions).float(), bins)
+        return recon, recon_value
 
 
 @torch.no_grad()

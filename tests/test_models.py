@@ -158,6 +158,142 @@ def test_predictor_never_sees_target_codes_or_values() -> None:
     assert not torch.allclose(baseline, model(timed, context, target).predictions)
 
 
+# --------------------------------------------------------------------------- #
+# The objective-shape flags
+# --------------------------------------------------------------------------- #
+
+
+def _masks(batch: dict[str, torch.Tensor], seed: int = 2):
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(seed)
+    )
+    assert int(target.sum()) > 0
+    return context, target
+
+
+def test_mask_token_time_off_makes_the_predictor_blind_to_the_clock() -> None:
+    """The counterpart of ``test_predictor_never_sees_target_codes_or_values``.
+
+    With the flag on (the default) perturbing a target's ``age`` moves the
+    prediction -- that is asserted there. With it off nothing about the time of a
+    target may reach the predictor, so the same perturbation must be a no-op.
+    """
+    torch.manual_seed(0)
+    model = EHRJEPA(_config(mask_token_time=False)).eval()
+    batch = _batch()
+    context, target = _masks(batch)
+    baseline = model(batch, context, target).predictions
+
+    timed = {k: v.clone() for k, v in batch.items()}
+    timed["age"][target] = timed["age"][target] + 11.0
+    timed["log_delta"][target] = timed["log_delta"][target] + 2.0
+    assert torch.equal(baseline, model(timed, context, target).predictions)
+
+
+@pytest.mark.parametrize("target_mode", ["shared", "ema"])
+def test_content_targets_are_invariant_to_the_clock(target_mode: str) -> None:
+    """``target.time_features: false`` makes the target a function of content only."""
+    torch.manual_seed(0)
+    model = EHRJEPA(_config(target_time_features=False, target_mode=target_mode)).eval()
+    batch = _batch()
+    context, target = _masks(batch)
+    baseline = model(batch, context, target).targets
+
+    timed = {k: v.clone() for k, v in batch.items()}
+    timed["age"] = timed["age"] + 7.0
+    timed["log_delta"] = timed["log_delta"] * 0.5
+    assert torch.equal(baseline, model(timed, context, target).targets)
+
+    # And the default does depend on it, or the assertion above is vacuous.
+    timed_model = EHRJEPA(_config(target_mode=target_mode)).eval()
+    assert not torch.allclose(
+        timed_model(batch, context, target).targets,
+        timed_model(timed, context, target).targets,
+    )
+
+
+@pytest.mark.parametrize("target_mode", ["shared", "ema"])
+def test_span_only_targets_cannot_absorb_the_context(target_mode: str) -> None:
+    """The context-copy shortcut, closed.
+
+    Rewrite every context event -- codes, values, times. A full-sequence target
+    encoder sees all of it and its target rows move; a span-only one has never
+    attended outside the span and must return the identical latents.
+    """
+    torch.manual_seed(0)
+    batch = _batch()
+    context, target = _masks(batch)
+    perturbed = {k: v.clone() for k, v in batch.items()}
+    perturbed["code_id"][context] = (perturbed["code_id"][context] + 17) % VOCAB
+    perturbed["value_bin"][context] = (perturbed["value_bin"][context] + 3) % 11
+    perturbed["value_z"][context] = perturbed["value_z"][context] - 2.0
+    perturbed["age"][context] = perturbed["age"][context] + 5.0
+
+    span = EHRJEPA(_config(target_span_only=True, target_mode=target_mode)).eval()
+    assert torch.equal(
+        span(batch, context, target).targets, span(perturbed, context, target).targets
+    )
+
+    full = EHRJEPA(_config(target_mode=target_mode)).eval()
+    assert not torch.allclose(
+        full(batch, context, target).targets, full(perturbed, context, target).targets
+    )
+
+
+def test_span_only_keeps_the_targets_in_their_original_order() -> None:
+    """The scatter back into window coordinates must not transpose anything.
+
+    Encoding the span alone and then reading position ``i`` has to give the same
+    vector as reading row ``rank(i)`` of the compacted span. A left-shift here
+    would pair every prediction with the wrong target and still train.
+    """
+    torch.manual_seed(0)
+    model = EHRJEPA(_config(target_span_only=True, target_mode="ema")).eval()
+    batch = _batch(batch=1, length=24)
+    context = torch.zeros(1, 24, dtype=torch.bool)
+    target = torch.zeros(1, 24, dtype=torch.bool)
+    context[0, :8] = True
+    positions = [10, 13, 14, 19]
+    target[0, positions] = True
+
+    scattered = model(batch, context, target).targets
+    compact = {k: v[:, positions] for k, v in batch.items()}
+    compact["attention_mask"] = torch.ones(1, len(positions), dtype=torch.long)
+    with torch.no_grad():
+        direct = model.target_encoder(
+            model.embed_batch(compact, target_side=True), compact["attention_mask"]
+        ).tokens[0]
+    assert torch.allclose(scattered, direct, atol=1e-6)
+
+
+def test_time_feature_dropout_fires_only_on_the_online_pass() -> None:
+    """It is an augmentation of the input the gradient flows through, not of the target."""
+    torch.manual_seed(0)
+    model = EHRJEPA(_config(time_feature_dropout=0.5, target_mode="ema"))
+    assert model.embed.time_dropout == 0.5
+    assert model.target_embed is not None and model.target_embed.time_dropout == 0.0
+
+    batch = _batch()
+    model.train()
+    first = model.embed_batch(batch)
+    second = model.embed_batch(batch)
+    assert not torch.allclose(first, second), "training-mode dropout must resample"
+    model.eval()
+    assert torch.equal(model.embed_batch(batch), model.embed_batch(batch))
+
+
+def test_zero_time_dropout_draws_no_randomness() -> None:
+    """The default must not perturb the RNG stream every other run depends on."""
+    embedding = EventEmbedding(VOCAB, 32, n_freq=8).train()
+    batch = _batch()
+    args = (batch["code_id"], batch["value_bin"], batch["value_z"], batch["age"])
+    torch.manual_seed(7)
+    before = torch.rand(4)
+    torch.manual_seed(7)
+    embedding(*args, batch["log_delta"])
+    assert torch.equal(before, torch.rand(4))
+
+
 def test_padding_does_not_change_the_subject_embedding() -> None:
     torch.manual_seed(0)
     model = EHRJEPA(_config()).eval()

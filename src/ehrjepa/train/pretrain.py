@@ -66,6 +66,8 @@ LOG_COLUMNS = (
     "pred_loss",
     "sigreg_tokens",
     "sigreg_cls",
+    "recon_loss",
+    "recon_value_loss",
     "ce",
     "top1",
     "top10",
@@ -180,7 +182,11 @@ class Trainer:
             self.objective: nn.Module = ARObjective(chunk=config.objective.ar_chunk).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
-            self.objective = JEPAObjective(config.objective).to(self.device)
+            self.objective = JEPAObjective(
+                config.objective,
+                recon_head=self.model.recon_head,
+                recon_value_head=self.model.recon_value_head,
+            ).to(self.device)
         self.optimizer = torch.optim.AdamW(
             param_groups(self.model, config.optim.weight_decay),
             lr=config.optim.lr,
@@ -426,6 +432,10 @@ class Trainer:
             body = "ce {ce:.4f} top1 {top1:.3f} top10 {top10:.3f}"
         else:
             body = "pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} sig_cls {sigreg_cls:.4f}"
+            if self.config.objective.lambda_recon != 0.0:
+                body += " recon {recon_loss:.4f}"
+                if self.config.objective.recon_value:
+                    body += " recon_val {recon_value_loss:.4f}"
         print(
             (
                 "step {step:>6} loss {loss:.4f} " + body + " rank {effective_rank:.1f} "

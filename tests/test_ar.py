@@ -362,12 +362,14 @@ def test_five_step_ar_run_on_the_debug_config_is_fast_and_logs(tmp_path: Path) -
     assert final["ce"] > 0
     assert 0.0 <= final["top1"] <= final["top10"] <= 1.0
     rows = (tmp_path / "metrics.csv").read_text().strip().splitlines()
-    assert rows[0].split(",")[:9] == [
+    assert rows[0].split(",")[:11] == [
         "step",
         "loss",
         "pred_loss",
         "sigreg_tokens",
         "sigreg_cls",
+        "recon_loss",
+        "recon_value_loss",
         "ce",
         "top1",
         "top10",

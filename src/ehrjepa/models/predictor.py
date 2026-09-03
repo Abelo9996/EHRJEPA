@@ -48,6 +48,13 @@ class Predictor(nn.Module):
         than allocating fresh ones. Shared modules are projected into the
         predictor width by a small linear map, since the embedding's encoders emit
         ``encoder_dim``.
+    mask_token_time:
+        When ``False`` a mask token is the bare learned ``MASK`` embedding, with
+        RoPE at the target's index its only remaining positional information, and
+        the whole module becomes independent of ``age`` and ``log_delta``. The
+        time encoders are still allocated -- unused parameters are skipped by
+        AdamW and keeping them leaves the checkpoint layout comparable -- they
+        simply never run.
     """
 
     def __init__(
@@ -62,10 +69,12 @@ class Predictor(nn.Module):
         attn_dropout: float = 0.0,
         n_freq: int = 16,
         time_encoders: tuple[nn.Module, nn.Module] | None = None,
+        mask_token_time: bool = True,
     ) -> None:
         super().__init__()
         self.encoder_dim = encoder_dim
         self.dim = dim
+        self.mask_token_time = mask_token_time
         self.in_proj = nn.Linear(encoder_dim, dim)
         self.out_proj = nn.Linear(dim, encoder_dim)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, dim))
@@ -87,7 +96,14 @@ class Predictor(nn.Module):
         self.apply(_init_linear)
 
     def target_tokens(self, age: Tensor, log_delta: Tensor) -> Tensor:
-        """Mask tokens for every position: ``MASK + f(age) + f(log_delta)``."""
+        """Mask tokens for every position: ``MASK + f(age) + f(log_delta)``.
+
+        With ``mask_token_time=False`` this is the bare ``MASK`` embedding, the
+        same vector at every position; what distinguishes one target from
+        another is then RoPE alone.
+        """
+        if not self.mask_token_time:
+            return self.mask_token.expand(age.shape[0], age.shape[1], self.dim)
         time = self.age_enc(age) + self.delta_enc(log_delta)
         return self.mask_token + self.time_proj(time)
 
