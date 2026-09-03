@@ -5,15 +5,22 @@
 # next five vary one JEPA knob each against `jepa_ema`, which is the reference
 # cell -- EMA targets, SIGReg on, the shipped 60/40 future/block masking mix.
 #
-# 12M tokens is about 0.85 epochs of the desynpuf-s1 train split at max_len 256
-# (78,997 subjects after min_len=16, 11.3M train events). It is not enough to
-# converge anything. It is enough to say whether two objectives separate, which
-# is the only question this grid asks.
+# Budget: 48M nominal token slots = 2,930 steps at 64 x 256. Measured on the M4,
+# that is ~40 min for the `ar` cell (10.0k tok/s) and ~33 min for a JEPA cell
+# (12.2k tok/s), inside the 45-minute-per-run ceiling this grid was sized to.
+#
+# Why not the 12M the phase brief starts from: 12M slots is 733 steps, which is
+# *less* compute than the 900-step sanity runs that already tied with a
+# random-init probe. A grid at that budget could only reproduce that tie, and
+# half of what phase 5a asks is whether anything changes with longer training.
+# 48M is 3.3x the sanity runs and, at the ~50% padding this cache shows at
+# max_len 256, about 24M real events -- roughly 2.1 epochs of the 11.3M-event
+# train split. Still nowhere near converged; enough to move.
 
 name: 2026-09-03-pilot-desynpuf
 base: configs/pretrain_pilot.yaml
 source: desynpuf-s1
-budget_tokens: 12000000
+budget_tokens: 48000000
 seed: 0
 
 # Identical to the phase-4 evaluation, so the numbers land in the same frame:
@@ -32,6 +39,10 @@ tasks: all
 reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
 reuse_models: [lr, gbm]
 control_models: [random_init]
+# One untrained control per architecture, not one per grid: a causal encoder's
+# CLS row is a constant even untrained, so the AR cell and the JEPA cells need
+# different controls to be compared against the same probe.
+control_runs: [ar, jepa_ema]
 
 runs:
   - name: ar

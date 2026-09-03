@@ -2,9 +2,11 @@
 #
 # Sized backwards from a wall-clock budget rather than from a parameter count:
 # the phase-5a pilot grid is six runs at one token budget on one 16 GB M4, and a
-# grid that takes a week is a grid that never finishes. At max_len 256 and batch
-# 64 this config trains at roughly 30k tok/s on MPS in float32, so a 12M-token
-# budget is about 45 minutes per run and the whole grid is one working day.
+# grid that takes a week is a grid that never finishes. Measured (see
+# scripts/throughput.py and runs/throughput/throughput.json): 12.2k tok/s for the
+# JEPA objective and 10.0k tok/s for the AR one, at 3.3 GB and 5.5 GB peak. The
+# 6x256 / max_len 512 / batch 32 config in pretrain_small.yaml gets 4.2k tok/s at
+# 10.4 GB on the same machine, which is the whole reason this file exists.
 #
 # Everything not about size is deliberately identical to configs/pretrain_small.yaml,
 # because the grid varies the objective and the masking, and a second difference
@@ -68,7 +70,7 @@ optim:
   accum_steps: 1
 
 run:
-  steps: 732              # 12M tokens at 64 x 256; scripts/ablate.py sets this
+  steps: 2930             # 48M token slots at 64 x 256; scripts/ablate.py sets this
   batch_size: 64
   seed: 0
   device: auto

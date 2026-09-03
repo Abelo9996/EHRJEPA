@@ -24,6 +24,10 @@ tasks: all
 reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
 reuse_models: [lr, gbm]
 control_models: [random_init]
+# One untrained control per architecture, not one per grid: a causal encoder's
+# CLS row is a constant even untrained, so the AR cell and the JEPA cells need
+# different controls to be compared against the same probe.
+control_runs: [micro_ar, micro_jepa_ema]
 
 runs:
   - name: micro_ar

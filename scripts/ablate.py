@@ -22,14 +22,17 @@ be interrupted -- by a sleep, an OOM, a closed lid -- and the recovery has to be
 **Baselines computed once.** ``lr`` and ``gbm`` are count-feature models with no
 dependence on the encoder, so their held-out scores are read straight out of an
 earlier run's ``predictions.parquet`` rather than refit six times.
-``random_init`` *does* depend on the architecture, so it is computed once against
-the grid's own first checkpoint and cached in ``baselines.json``: the control for
-a 4x192 encoder has to be an untrained 4x192 encoder.
+``random_init`` *does* depend on the architecture, so it is computed once per
+cell named in ``control_runs`` and cached in ``baselines.json`` as
+``random_init@<run>``: the control for a 4x192 encoder has to be an untrained
+4x192 encoder, and the control for a *causal* one has to be causal, because an
+untrained causal encoder's CLS row is a constant and its probe is a different
+probe.
 
 Detached use, which is the intended one::
 
     nohup python scripts/ablate.py configs/grids/pilot_desynpuf.yaml &
-    tail -f runs/pilot_desynpuf/ablate.log
+    tail -f runs/2026-09-03-pilot-desynpuf/ablate.log
 """
 
 from __future__ import annotations
@@ -116,6 +119,11 @@ class Grid:
     reuse_predictions: str | None = None
     reuse_models: tuple[str, ...] = ("lr", "gbm")
     control_models: tuple[str, ...] = ("random_init",)
+    #: Cells whose architecture gets its own untrained control. Empty means "the
+    #: first run". A causal encoder and a bidirectional one are different models
+    #: even untrained -- the causal one's CLS row is a constant -- so a grid that
+    #: mixes objectives wants one control per objective, not one per grid.
+    control_runs: tuple[str, ...] = ()
     docs_root: Path = Path("docs/experiments")
     runs_root: Path = Path("runs")
 
@@ -162,6 +170,7 @@ def load_grid(path: str | Path) -> Grid:
         "reuse_predictions",
         "reuse_models",
         "control_models",
+        "control_runs",
         "docs_root",
         "runs_root",
     }
@@ -193,15 +202,20 @@ def load_grid(path: str | Path) -> Grid:
         )
     fields = {
         key: raw[key]
-        for key in known - {"runs", "name", "base", "reuse_models", "control_models"}
+        for key in known
+        - {"runs", "name", "base", "reuse_models", "control_models", "control_runs"}
         if key in raw
     }
     for key in ("docs_root", "runs_root"):
         if key in fields:
             fields[key] = Path(fields[key])
-    for key in ("reuse_models", "control_models"):
+    for key in ("reuse_models", "control_models", "control_runs"):
         if key in raw:
             fields[key] = tuple(raw[key])
+    fields.setdefault("control_runs", (runs[0].name,))
+    unknown_control = set(fields["control_runs"]) - seen
+    if unknown_control:
+        raise ValueError(f"control_runs names no such run: {sorted(unknown_control)}")
     return Grid(
         name=str(raw.get("name") or path.stem),
         base=Path(raw["base"]),
@@ -393,20 +407,28 @@ def eval_one(grid: Grid, entry: Mapping[str, Any], with_controls: bool, log: Log
     return out
 
 
-def baselines_for(grid: Grid, fresh: Mapping[str, Mapping[str, float]] | None = None) -> dict:
+def control_name(model: str, run: str) -> str:
+    """``random_init@jepa_ema`` -- which cell's architecture this control copies."""
+    return f"{model}@{run}"
+
+
+def baselines_for(
+    grid: Grid, fresh: Mapping[str, Mapping[str, float]] | None = None, run: str = ""
+) -> dict:
     """Reference AUROCs: reused count baselines plus any freshly computed control.
 
-    Cached in ``baselines.json`` so a resumed grid does not recompute the control
-    against a different checkpoint's architecture than the first pass used.
+    Cached in ``baselines.json`` so a resumed grid does not recompute a control
+    against a different architecture than the first pass used, and so a control
+    survives being asked for after the cell that produced it has finished.
     """
     path = grid.doc_dir / "baselines.json"
     stored = json.loads(path.read_text()) if path.exists() else {}
-    if not stored and grid.reuse_predictions:
+    if grid.reuse_predictions and not any(m in stored for m in grid.reuse_models):
         stored.update(_auroc_from_predictions(REPO / grid.reuse_predictions, grid.reuse_models))
-    if fresh:
+    if fresh and run:
         for model in grid.control_models:
             if model in fresh:
-                stored[model] = dict(fresh[model])
+                stored[control_name(model, run)] = dict(fresh[model])
     if stored:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(stored, indent=2, sort_keys=True) + "\n")
@@ -454,9 +476,12 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
             )
             final = train_one(grid, entry, log)
             log.say(f"trained {entry['run']} in {final['wall_s']:.0f}s")
-            controls_needed = not (grid.doc_dir / "baselines.json").exists()
+            have = baselines_for(grid)
+            controls_needed = entry["run"] in grid.control_runs and not all(
+                control_name(m, entry["run"]) in have for m in grid.control_models
+            )
             scored = eval_one(grid, entry, controls_needed, log)
-            baselines_for(grid, scored)
+            baselines_for(grid, scored, entry["run"])
             row = _row(entry, final, scored)
             payload["runs"] = [r for r in payload["runs"] if r["run"] != row["run"]] + [row]
             payload["baselines"] = baselines_for(grid)
@@ -599,7 +624,8 @@ def render_summary(payload: Mapping[str, Any]) -> str:
             "",
             "`lr` and `gbm` are count-feature baselines and do not depend on the encoder, so "
             "their scores are reused from an earlier run's `predictions.parquet`. "
-            "`random_init` is this grid's own architecture with untrained weights.",
+            "`random_init@<run>` is that run's own architecture with untrained weights, probed "
+            "identically -- the control for a causal encoder is an untrained causal encoder.",
         ]
     return "\n".join(lines) + "\n"
 

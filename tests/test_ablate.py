@@ -182,7 +182,9 @@ def test_the_shipped_grids_parse_and_plan(tmp_path: Path) -> None:
         "jepa_ema_future",
         "jepa_ema_block",
     ]
-    assert {e["tokens"] for e in ablate.plan(pilot)} == {733 * 64 * 256}
+    tokens = {e["tokens"] for e in ablate.plan(pilot)}
+    assert len(tokens) == 1, "every pilot cell must share one budget"
+    assert tokens == {ablate.steps_for(pilot.budget_tokens, 64, 256) * 64 * 256}
 
 
 # --------------------------------------------------------------------------- #
