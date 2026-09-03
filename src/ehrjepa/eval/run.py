@@ -127,8 +127,14 @@ def evaluate_task(
     seed: int,
     device: str | None,
     few_shot: bool,
+    predictions: list[pl.DataFrame] | None = None,
 ) -> dict:
-    """Fit and score every model on one task's shared anchor frame."""
+    """Fit and score every model on one task's shared anchor frame.
+
+    ``predictions`` collects one frame per (task, model) of the held-out scores,
+    so a metric can be changed later without refitting anything.
+    """
+    predictions = [] if predictions is None else predictions
     index = _split_arrays(anchors, eval_split)
     y = _labels(anchors)
     entry: dict = {
@@ -200,6 +206,11 @@ def evaluate_task(
 
         p = fit.predict_proba(x_ev)
         scores[spec.name] = p
+        predictions.append(
+            anchors[index[eval_split]]
+            .select("subject_id", "anchor_time", "label")
+            .with_columns(task=pl.lit(task_name), model=pl.lit(spec.name), score=pl.Series(p))
+        )
         record = {
             "kind": spec.kind,
             "params": fit.params,
@@ -295,6 +306,7 @@ def run(
         "tasks": {},
     }
     reader = HistoryReader(cache_dir, max_len=None)
+    predictions: list[pl.DataFrame] = []
     for spec in supported:
         if spec.name not in summary["tasks"]:
             results["skipped"][spec.name] = "not built"
@@ -319,9 +331,13 @@ def run(
             seed=seed,
             device=device,
             few_shot=few_shot,
+            predictions=predictions,
         )
         results["tasks"][spec.name]["dropped_not_in_cache"] = before - anchors.height
     results["runtime_seconds"] = round(time.time() - started, 1)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if predictions:
+        pl.concat(predictions).write_parquet(out_dir / "predictions.parquet")
     report.write(results, out_dir)
     return results
 

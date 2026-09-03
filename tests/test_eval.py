@@ -373,6 +373,13 @@ def test_calibration_slope_recovers_a_known_distortion() -> None:
     )
 
 
+def test_calibration_slope_is_nan_when_the_recalibration_separates() -> None:
+    """A saturating model gives the recalibration no finite maximum to find."""
+    y = np.array([0] * 50 + [1] * 50)
+    p = np.concatenate([np.full(50, 1e-9), np.full(50, 1 - 1e-9)])
+    assert np.isnan(metrics.calibration_slope(y, p))
+
+
 def test_metrics_are_nan_on_a_single_class_split() -> None:
     y = np.zeros(10, dtype=int)
     p = np.linspace(0.1, 0.9, 10)

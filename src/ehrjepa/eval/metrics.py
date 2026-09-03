@@ -28,6 +28,11 @@ __all__ = [
 
 _EPS = 1e-12
 
+#: Probabilities are clipped this far from 0 and 1 before being turned into
+#: logits. Tighter than :data:`_EPS` on purpose: a model that emits a hard 0 or
+#: 1 would otherwise contribute a +-27 logit and dominate the recalibration.
+_CALIBRATION_EPS = 1e-6
+
 
 def _as_arrays(y: Sequence[int] | np.ndarray, p: Sequence[float] | np.ndarray):
     y = np.asarray(y, dtype=np.float64).ravel()
@@ -58,22 +63,35 @@ def brier(y, p) -> float:
     return float("nan") if y.size == 0 else float(np.mean((p - y) ** 2))
 
 
+#: Slopes past this magnitude mean the recalibration separated rather than fit.
+_SLOPE_LIMIT = 25.0
+
+
 def calibration_slope(y, p) -> float:
     """Slope of a logistic recalibration of ``logit(p)`` on ``y``.
 
     1.0 is perfect; below 1.0 the scores are over-dispersed (too confident),
-    above 1.0 under-dispersed. Fitted by plain Newton steps on the one-parameter
-    -plus-intercept model so it has no dependence on a solver's regularisation
-    default.
+    above 1.0 under-dispersed. Fitted by plain Newton steps on the
+    one-parameter-plus-intercept model so it has no dependence on a solver's
+    regularisation default.
+
+    ``nan`` when the recalibration is not identified: too few positives, scores
+    with no spread, or -- the common case with a saturating gradient-boosting
+    model on a rare outcome -- a ``logit(p)`` that separates the classes, where
+    the likelihood has no finite maximum and Newton runs off to whatever the
+    iteration cap allows. Reporting that divergence as a number would be
+    reporting the iteration cap.
     """
     y, p = _as_arrays(y, p)
     if _degenerate(y):
         return float("nan")
-    x = np.log(np.clip(p, _EPS, 1 - _EPS) / (1 - np.clip(p, _EPS, 1 - _EPS)))
+    clipped = np.clip(p, _CALIBRATION_EPS, 1 - _CALIBRATION_EPS)
+    x = np.log(clipped / (1 - clipped))
     if np.allclose(x, x[0]):
         return float("nan")
     beta = np.array([0.0, 1.0])
     design = np.column_stack([np.ones_like(x), x])
+    converged = False
     for _ in range(100):
         eta = design @ beta
         mu = 1.0 / (1.0 + np.exp(-np.clip(eta, -30, 30)))
@@ -85,9 +103,12 @@ def calibration_slope(y, p) -> float:
         except np.linalg.LinAlgError:  # pragma: no cover - singular design
             return float("nan")
         beta = beta + step
+        if not np.all(np.isfinite(beta)) or abs(beta[1]) > _SLOPE_LIMIT:
+            return float("nan")
         if np.max(np.abs(step)) < 1e-8:
+            converged = True
             break
-    return float(beta[1])
+    return float(beta[1]) if converged else float("nan")
 
 
 #: Metric name -> callable, in report order.

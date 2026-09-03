@@ -26,11 +26,13 @@ archived under [`legacy/`](legacy/README.md); it has known label leakage and
 none of its numbers are valid.
 
 What exists now: the MEDS ETL and tensor cache (`data/`), the three networks
-(`models/`), the SIGReg + latent-prediction objective (`objectives/`), and a
-resumable pretraining loop (`train/`). The only runs performed so far are the
-short MPS sanity runs recorded under `docs/experiments/`, which exist to show
-the diagnostics move in the expected directions -- they are not results.
-`eval/` is still a docstring.
+(`models/`), the SIGReg + latent-prediction objective (`objectives/`), a
+resumable pretraining loop (`train/`), and a downstream evaluation harness
+(`eval/`) with ACES-defined tasks, count-feature baselines, frozen-encoder
+probes and bootstrap intervals. The runs recorded under `docs/experiments/` are
+short MPS sanity runs and one evaluation of the checkpoints they produced;
+those checkpoints are ~900 steps on one demo-scale dataset, so the evaluation
+measures the harness on real cohorts, not a trained model.
 
 ## Data access
 
