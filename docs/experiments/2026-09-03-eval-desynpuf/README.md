@@ -123,3 +123,96 @@ Predictive structure between a patient's history and their future is therefore
 weakened by construction. Low AUROCs on this source are a property of the
 source; they are not comparable to published numbers on MIMIC or EHRSHOT, and
 this directory is not the place to conclude anything about the architecture.
+
+## 2026-09-03 addendum -- `lr` was scored on a scaling bug, not a weak baseline
+
+The `lr` column above originally read .55-.59 AUROC on every task, well below
+`gbm` on identical features (.74-.79) and even below the `random_init` control
+probe (.67-.74). On count features that gap is not expected: logistic
+regression on the same features GBM sees is normally within a few points of
+it, not 15-20 points under an *untrained* transformer.
+
+The cause was in `baselines.fit_logistic`, not in the cohort or the features.
+Sparse inputs were scaled with `StandardScaler(with_mean=False)`, which
+divides each column by its own standard deviation. `prune_columns` keeps
+columns down to `min_df=10` training rows out of tens of thousands, so most of
+the ~103k-110k kept columns per task are rare, and a rare column's standard
+deviation is tiny -- dividing by it inflates that column's scale far past a
+common column's. With one L2 penalty shared across the whole (badly
+rescaled) feature space, the model had to shrink every coefficient hard
+enough to keep the inflated rare columns from dominating, which also
+crushed the informative common columns. The tuned `C` collapsed to the low
+edge of `LOGISTIC_GRID` on every task (`0.003`, the smallest value on the
+grid) -- the signature of a regulariser fighting a scaling problem, not of a
+genuinely weak linear fit. An extended grid (`1e-4` to `1e2`) and `solver="saga"`
+did not change the picture: no configuration of the old scaler reached what
+`gbm` gets on the same matrix, and no solver reported a convergence warning,
+so this was never a `max_iter`/solver issue.
+
+Four scalings were compared on `inpatient_365d` and `new_dx_365d/diabetes`
+(fixed `C=1.0`, `liblinear`, same train/tuning/held_out split as the run):
+
+| scaling | inpatient_365d held-out AUROC | new_dx_365d/diabetes held-out AUROC |
+|---|---|---|
+| `StandardScaler(with_mean=False)` (as shipped) | 0.575 | 0.566 |
+| no scaling | 0.625 | 0.674 |
+| `MaxAbsScaler` | 0.625 | 0.664 |
+| `TfidfTransformer` (idf reweighting + row L2-norm) | 0.695 | 0.740 |
+
+`TfidfTransformer` -- applied on top of the existing `log1p` counts, fit on
+`train` only -- was adopted as the fix: `baselines.fit_logistic` now scales
+sparse inputs with it instead of `StandardScaler(with_mean=False)`, and dense
+inputs (the embedding probes) still get a plain `StandardScaler`, unaffected
+by this change. It fixes the same failure mode `StandardScaler` had by
+construction: idf caps how much a rare column can dominate, and normalising
+each row to unit length makes a subject's contribution depend on the shape of
+their history rather than on the global variance of each column. With the
+fix, the tuned `C` lands inside the existing `LOGISTIC_GRID` (`0.1`-`1.0`
+across tasks) rather than on its low edge, so the grid did not need
+extending. `class_weight="balanced"` was also tried under the old scaler and
+made no material difference (0.576 vs 0.575 on `inpatient_365d`), confirming
+the scaler, not the class imbalance, was the defect.
+
+Six other items were checked and found clean (see the audit for the exact
+commands): the count feature matrix has no zero-nnz training rows and all
+five feature blocks (`count_30d`, `count_365d`, `count_all`, `last_value`,
+`value_count`) are populated for both tasks; `lr` and `gbm` are fit on the
+literal same sliced matrix inside `evaluate_task`, so there was never a
+column-order mismatch between them; the `gbm` worker only ever sees
+`held_out` once, for the final prediction after tuning selects a setting on
+`tuning`; and the embedding cache is keyed by model name
+(`emb__random_init.parquet` vs `emb__ckpt-sanity-A-default.parquet`, distinct
+files) with genuinely different cached vectors for the same
+`(subject_id, anchor_time)` row -- `random_init` never reused a pretrained
+checkpoint's embeddings.
+
+Only `lr` was refit -- `gbm`, `random_init`, and the two checkpoint probes are
+untouched and their numbers above are unchanged. The refit used the same
+3,000-subject `held_out` subset (`--eval-subject-limit 3000
+--eval-subject-seed 0`), the same 200-resample bootstrap, and the same seeds
+as the original run. New `lr` numbers:
+
+| task | lr (before) | lr (after fix) | gbm (unchanged) |
+|---|---|---|---|
+| `mortality_365d` | 0.553 | 0.554 | 0.572 |
+| `inpatient_365d` | 0.585 | 0.708 | 0.744 |
+| `readmission_30d` | 0.558 | 0.658 | 0.672 |
+| `new_dx_365d/diabetes` | 0.585 | 0.740 | 0.772 |
+| `new_dx_365d/heart_failure` | 0.582 | 0.744 | 0.789 |
+| `new_dx_365d/ckd` | 0.564 | 0.736 | 0.765 |
+| `new_dx_365d/copd` | 0.578 | 0.726 | 0.767 |
+
+`lr` is now within a few points of `gbm` on six of seven tasks, and ahead of
+`random_init` on five of seven (paired bootstrap `p < 0.05`) -- the pattern
+count-feature baselines normally show. `mortality_365d` did not move: its
+prevalence is 2.2% on this 3,000-subject cut and no model, `gbm` included,
+clears an AUROC of 0.60 there, so the fix could not have changed a result the
+scaling bug was never the cause of. Full numbers, paired-bootstrap
+comparisons, and few-shot curves for the refit `lr` are in the updated
+[`results.md`](results.md) / [`results.json`](results.json);
+[`predictions.parquet`](predictions.parquet) has the refit `lr` scores in
+place, everything else byte-identical to the original run. A regression test,
+`test_fit_logistic_sparse_scaling_is_not_wrecked_by_many_rare_columns` in
+`tests/test_eval.py`, reproduces the failure shape (a few informative columns
+diluted by hundreds of rare ones at the `min_df` edge) and asserts the fixed
+`fit_logistic` beats the old scaling formula by a wide margin on it.

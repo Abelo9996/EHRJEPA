@@ -361,6 +361,61 @@ def test_prune_columns_uses_train_support_only() -> None:
     assert keep.tolist() == [0]
 
 
+def test_fit_logistic_sparse_scaling_is_not_wrecked_by_many_rare_columns() -> None:
+    """Regression test for the ``StandardScaler(with_mean=False)`` defect.
+
+    Column-wise standardisation divides a rare column by its own (tiny)
+    standard deviation, which inflates that column's scale far more than a
+    common one's. With the ~100k-column count matrices this harness actually
+    fits -- most of them at or near ``prune_columns``' ``min_df=10`` floor --
+    that inflation forced every coefficient to shrink to avoid the noise
+    columns dominating, collapsed the tuned ``C`` to the low edge of
+    ``LOGISTIC_GRID``, and capped held-out AUROC on ``inpatient_365d`` and
+    ``new_dx_365d/diabetes`` around .57-.59 on the desynpuf-s1 eval (see
+    docs/experiments/2026-09-03-eval-desynpuf/). This reproduces that shape at
+    unit-test scale: three informative columns buried in hundreds of columns
+    each nonzero in only 10 rows, exactly the support ``min_df=10`` lets
+    through.
+    """
+    from scipy import sparse
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    rng = np.random.default_rng(0)
+    n_train, n_tune = 4000, 1000
+    n = n_train + n_tune
+    y = rng.integers(0, 2, size=n)
+
+    signal = np.zeros((n, 3))
+    present = rng.random((n, 3)) < 0.4
+    signal[present] = (2.0 * y[:, None] + rng.normal(0, 0.3, size=(n, 3)))[present]
+    signal = np.clip(signal, 0, None)
+
+    n_noise = 3000
+    noise = np.zeros((n, n_noise))
+    for j in range(n_noise):
+        rows = rng.choice(n, size=10, replace=False)
+        noise[rows, j] = rng.uniform(0.5, 2.0, size=10)
+
+    x = sparse.csr_matrix(np.hstack([signal, noise]))
+    x_tr, x_tu = x[:n_train], x[n_train:]
+    y_tr, y_tu = y[:n_train], y[n_train:]
+
+    # The scaling this replaced: divide by the column's own std, best of the
+    # same grid fit_logistic searches.
+    old_scaler = StandardScaler(with_mean=False).fit(x_tr)
+    old_best = 0.0
+    for c in baselines.LOGISTIC_GRID:
+        model = LogisticRegression(C=c, max_iter=2000, solver="liblinear", random_state=0)
+        model.fit(old_scaler.transform(x_tr), y_tr)
+        score = metrics.auroc(y_tu, model.predict_proba(old_scaler.transform(x_tu))[:, 1])
+        old_best = max(old_best, score)
+
+    fit = baselines.fit_logistic(x_tr, y_tr, x_tu, y_tu, seed=0)
+
+    assert fit.tuning_auroc > old_best + 0.05
+
+
 # --------------------------------------------------------------------------- #
 # Metrics
 # --------------------------------------------------------------------------- #
