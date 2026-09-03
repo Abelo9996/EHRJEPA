@@ -16,7 +16,9 @@ during training.
 """
 
 from ehrjepa.data.masking import future_span_mask, multi_block_mask, sample_masks
+from ehrjepa.objectives.ar import ARObjective, ARStats, NextCodeHead, ar_loss, next_code_targets
 from ehrjepa.objectives.loss import (
+    OBJECTIVE_KINDS,
     JEPAObjective,
     ObjectiveConfig,
     collapse_diagnostics,
@@ -25,14 +27,20 @@ from ehrjepa.objectives.loss import (
 from ehrjepa.objectives.sigreg import SIGReg, epps_pulley, random_directions, sigreg
 
 __all__ = [
+    "OBJECTIVE_KINDS",
+    "ARObjective",
+    "ARStats",
     "JEPAObjective",
     "ObjectiveConfig",
+    "NextCodeHead",
     "SIGReg",
+    "ar_loss",
     "collapse_diagnostics",
     "epps_pulley",
     "future_span_mask",
     "jepa_loss",
     "multi_block_mask",
+    "next_code_targets",
     "random_directions",
     "sample_masks",
     "sigreg",

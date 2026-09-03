@@ -62,6 +62,13 @@ class EHRJEPAConfig:
     attn_dropout: float = 0.0
     n_freq: int = 16
 
+    #: Causal (autoregressive) attention. Required by ``objective.kind: ar``;
+    #: a JEPA encoder is bidirectional and leaves this ``False``.
+    causal: bool = False
+    #: Tie the next-code output projection to the code embedding table. Only the
+    #: AR model reads this; :class:`EHRJEPA` has no output vocabulary.
+    tie_embeddings: bool = True
+
     pred_dim: int = 128
     pred_depth: int = 4
     pred_heads: int = 4
@@ -117,6 +124,7 @@ class EHRJEPA(nn.Module):
             mlp_ratio=config.mlp_ratio,
             dropout=config.dropout,
             attn_dropout=config.attn_dropout,
+            causal=config.causal,
         )
         shared = (self.embed.age_enc, self.embed.delta_enc) if config.share_time_encoders else None
         self.predictor = Predictor(

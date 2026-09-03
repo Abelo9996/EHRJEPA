@@ -6,10 +6,25 @@ before** the anchor. Nothing is fine-tuned -- a probe is a logistic regression o
 frozen features, so a difference between two checkpoints is a difference in the
 representation and not in how much supervised capacity was bolted on.
 
-Each anchor yields ``concat(cls, mean of token outputs)``: the CLS row is what
-the pretraining objective regularises, the masked mean is the cheap pooled
-alternative, and concatenating costs one extra ``dim`` of probe parameters
+Each anchor yields ``concat(cls, mean of token outputs)`` by default: the CLS row
+is what the pretraining objective regularises, the masked mean is the cheap
+pooled alternative, and concatenating costs one extra ``dim`` of probe parameters
 rather than a decision about which one to trust.
+
+Two knobs widen that, both defaulting to the behaviour above so every number
+already in ``docs/experiments/`` still reproduces:
+
+``features``
+    ``cls_mean`` (``2 * dim``), ``last`` (``dim``, the final valid token), or
+    ``cls_mean_last`` (``3 * dim``). ``last`` exists for causal checkpoints, whose
+    CLS row sits at position 0 and can therefore see nothing but itself -- for
+    those the CLS half of ``cls_mean`` is a constant column and the useful
+    "summary of everything up to now" row is the last one.
+``layer``
+    ``final`` (after the encoder's output LayerNorm) or ``penultimate`` (the
+    residual stream entering the last block). Late layers of a self-supervised
+    encoder specialise toward the pretraining objective; the layer below is
+    routinely the better frozen feature, and it costs one flag to find out.
 
 ``random_init`` builds the same architecture from the checkpoint's own model
 config and leaves the weights at their initialisation. It is the control: a
@@ -30,11 +45,36 @@ import torch
 from ehrjepa.data.dataset import collate_events
 from ehrjepa.eval.baselines import LOGISTIC_GRID, FittedModel, fit_logistic
 from ehrjepa.eval.history import HistoryReader, anchor_minutes
+from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig
 
-__all__ = ["embed", "embed_cached", "embedding_path", "few_shot", "fit_probe", "load_encoder"]
+__all__ = [
+    "PROBE_FEATURES",
+    "PROBE_LAYERS",
+    "embed",
+    "embed_cached",
+    "embedding_path",
+    "few_shot",
+    "fit_probe",
+    "load_encoder",
+    "n_features",
+]
 
 log = logging.getLogger(__name__)
+
+#: Pooling choices and the multiple of ``dim`` each produces.
+PROBE_FEATURES: dict[str, int] = {"cls_mean": 2, "last": 1, "cls_mean_last": 3}
+
+#: Which encoder depth the features are read from.
+PROBE_LAYERS: tuple[str, ...] = ("final", "penultimate")
+
+
+def n_features(dim: int, features: str = "cls_mean") -> int:
+    """Width of one embedding row under a pooling choice."""
+    if features not in PROBE_FEATURES:
+        raise ValueError(f"features must be one of {sorted(PROBE_FEATURES)}, got {features!r}")
+    return PROBE_FEATURES[features] * dim
+
 
 #: Few-shot sizes: ``k`` positives and ``k`` negatives, or the whole train split.
 FEW_SHOT_K: tuple[int | None, ...] = (32, 128, 512, None)
@@ -49,13 +89,20 @@ def load_encoder(
     vocab_size: int | None = None,
     random_init: bool = False,
     seed: int = 0,
-) -> tuple[EHRJEPA, int]:
+) -> tuple[EHRJEPA | EHRAR, int]:
     """``(model, max_len)`` from a training checkpoint.
+
+    Which class gets built is read off the checkpoint's own
+    ``config.objective.kind``, so an ``ar`` checkpoint loads its next-code head
+    and a ``jepa`` one its predictor without the caller having to know or say.
+    Checkpoints written before the AR objective existed carry no ``kind`` and are
+    read as ``jepa``, which is what they are.
 
     ``random_init=True`` keeps the checkpoint's architecture and discards its
     weights, which is the control arm. ``checkpoint=None`` requires
     ``vocab_size`` and builds a default-shaped model, which only the tests use.
     """
+    kind = "jepa"
     if checkpoint is None:
         if vocab_size is None:
             raise ValueError("vocab_size is required when no checkpoint is given")
@@ -65,9 +112,10 @@ def load_encoder(
         payload = torch.load(Path(checkpoint), map_location="cpu", weights_only=False)
         config = EHRJEPAConfig.from_mapping(payload["model_config"])
         max_len = int(payload["config"]["data"]["max_len"])
+        kind = str(payload["config"].get("objective", {}).get("kind", "jepa"))
         state = payload["model"]
     torch.manual_seed(seed)
-    model = EHRJEPA(config)
+    model: EHRJEPA | EHRAR = EHRAR(config) if kind == "ar" else EHRJEPA(config)
     if state is not None and not random_init:
         model.load_state_dict(state)
     return model.eval().float(), max_len
@@ -94,11 +142,16 @@ def embed(
     device: str | None = None,
     seed: int = 0,
     vocab_size: int | None = None,
+    features: str = "cls_mean",
+    layer: str = "final",
 ) -> np.ndarray:
-    """``(n_anchors, 2 * dim)`` embeddings, in ``anchors`` row order.
+    """``(n_anchors, n_features(dim, features))`` embeddings, in ``anchors`` row order.
 
     ``anchors`` needs ``subject_id``, ``anchor_time`` and ``split``.
     """
+    width = n_features(1, features)
+    if layer not in PROBE_LAYERS:
+        raise ValueError(f"layer must be one of {PROBE_LAYERS}, got {layer!r}")
     model, max_len = load_encoder(
         checkpoint, vocab_size=vocab_size, random_init=random_init, seed=seed
     )
@@ -109,7 +162,7 @@ def embed(
     minutes = anchor_minutes(anchors["anchor_time"])
     subjects = anchors["subject_id"].to_numpy()
     splits = anchors["split"].to_list()
-    out = np.zeros((anchors.height, 2 * model.config.dim), dtype=np.float32)
+    out = np.zeros((anchors.height, width * model.config.dim), dtype=np.float32)
 
     for start in range(0, anchors.height, batch_size):
         stop = min(start + batch_size, anchors.height)
@@ -120,26 +173,61 @@ def embed(
         batch = collate_events(items)
         batch = {k: v.to(dev) for k, v in batch.items()}
         tokens = model.embed_batch(batch)
-        encoded = model.encoder(tokens, batch["attention_mask"])
-        mask = batch["attention_mask"].to(encoded.tokens.dtype).unsqueeze(-1)
-        pooled = (encoded.tokens * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
-        rows = torch.cat([encoded.cls, pooled], dim=-1).float().cpu().numpy()
-        out[start:stop] = rows
+        encoded = model.encoder(
+            tokens, batch["attention_mask"], return_penultimate=layer == "penultimate"
+        )
+        cls = encoded.cls if layer == "final" else encoded.cls_penultimate
+        hidden = encoded.tokens if layer == "final" else encoded.tokens_penultimate
+        rows = torch.cat(_pool(hidden, cls, batch["attention_mask"], features), dim=-1)
+        out[start:stop] = rows.float().cpu().numpy()
         if start and start % (batch_size * 50) == 0:
             log.info("embedded %d/%d", start, anchors.height)
     return out
 
 
-def embedding_path(cache_root: Path | str, source: str, model_name: str) -> Path:
-    """Where embeddings are memoised: one parquet per (source, model).
+def _pool(
+    hidden: torch.Tensor, cls: torch.Tensor, attention_mask: torch.Tensor, features: str
+) -> list[torch.Tensor]:
+    """The pieces ``features`` names, in a fixed order, each ``(B, dim)``.
+
+    ``last`` is the final *valid* token, not ``hidden[:, -1]``: windows are
+    right-padded, so the last row of a short history is padding. A window with no
+    valid position at all (which the cohort filter should already have removed)
+    falls back to position 0 rather than indexing with -1.
+    """
+    mask = attention_mask.to(hidden.dtype).unsqueeze(-1)
+    parts: list[torch.Tensor] = []
+    if features in ("cls_mean", "cls_mean_last"):
+        parts.append(cls)
+        parts.append((hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0))
+    if features in ("last", "cls_mean_last"):
+        index = (attention_mask.sum(dim=1).long() - 1).clamp(min=0)
+        parts.append(hidden.gather(1, index[:, None, None].expand(-1, 1, hidden.shape[-1]))[:, 0])
+    return parts
+
+
+def embedding_path(
+    cache_root: Path | str,
+    source: str,
+    model_name: str,
+    features: str = "cls_mean",
+    layer: str = "final",
+) -> Path:
+    """Where embeddings are memoised: one parquet per (source, model, pooling).
 
     Keyed on ``(subject_id, anchor_time)`` rather than on a task, because the
     default anchor rule gives every task except ``readmission_30d`` the same
     anchors -- the ``new_dx`` tasks are subsets of them -- so a per-task cache
     would re-run the encoder over the same windows five times.
+
+    The default pooling keeps the historical filename, so the caches written
+    before ``--probe-features`` existed are still hits; anything else gets its own
+    file, because two poolings of the same checkpoint are different vectors of
+    different widths and sharing a file would silently mix them.
     """
     safe = model_name.replace("/", "__").replace(":", "-")
-    return Path(cache_root) / source / f"emb__{safe}.parquet"
+    suffix = "" if (features, layer) == ("cls_mean", "final") else f"__{features}__{layer}"
+    return Path(cache_root) / source / f"emb__{safe}{suffix}.parquet"
 
 
 _KEY = ("subject_id", "anchor_time")

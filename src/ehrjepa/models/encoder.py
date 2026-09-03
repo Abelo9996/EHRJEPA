@@ -4,13 +4,22 @@ The encoder sees already-embedded tokens (see :mod:`~ehrjepa.models.embedding`)
 and a boolean validity mask, prepends a learned CLS token whose output is the
 subject embedding, and returns both that and the per-event outputs.
 
-Attention is bidirectional -- this is a joint-embedding model, not a language
-model, and the context window is a *set* of events the predictor is allowed to
-look at from both sides. Masking is key-side only: an invalid (padding, or
-context-dropped) position still produces an output row, it just never gets
-attended to. That keeps the tensor rectangular and, because CLS is always a valid
-key, guarantees no attention row is fully masked, which is where
+Attention is bidirectional by default -- this is a joint-embedding model, not a
+language model, and the context window is a *set* of events the predictor is
+allowed to look at from both sides. Masking is key-side only: an invalid
+(padding, or context-dropped) position still produces an output row, it just
+never gets attended to. That keeps the tensor rectangular and, because CLS is
+always a valid key, guarantees no attention row is fully masked, which is where
 ``scaled_dot_product_attention`` would otherwise return NaN.
+
+``causal=True`` switches the same module into the autoregressive regime used by
+the next-code baseline: the key-padding mask is intersected with a lower
+triangle, so position ``i`` sees positions ``0..i`` and nothing later. CLS keeps
+its place at index 0 and is therefore a visible *key* for every position. Its own
+output row is then a function of the CLS parameter alone -- a causal model cannot
+have a prefix token that reads the sequence without leaking the future back
+through it at the next layer -- which is why :mod:`ehrjepa.eval.probe` offers
+``last`` (the final valid token) as a pooling option for causal checkpoints.
 """
 
 from __future__ import annotations
@@ -24,7 +33,12 @@ __all__ = ["Encoder", "EncoderOutput"]
 
 
 class EncoderOutput(dict):
-    """``{"cls": (B, D), "tokens": (B, L, D)}`` -- a dict so it survives checkpointing."""
+    """``{"cls": (B, D), "tokens": (B, L, D)}`` -- a dict so it survives checkpointing.
+
+    With ``return_penultimate=True`` it also carries ``cls_penultimate`` and
+    ``tokens_penultimate``: the residual stream after the second-to-last block,
+    *before* the final LayerNorm.
+    """
 
     @property
     def cls(self) -> Tensor:
@@ -33,6 +47,14 @@ class EncoderOutput(dict):
     @property
     def tokens(self) -> Tensor:
         return self["tokens"]
+
+    @property
+    def cls_penultimate(self) -> Tensor:
+        return self["cls_penultimate"]
+
+    @property
+    def tokens_penultimate(self) -> Tensor:
+        return self["tokens_penultimate"]
 
 
 class Encoder(nn.Module):
@@ -49,6 +71,8 @@ class Encoder(nn.Module):
         MLP choices have comparable parameter counts.
     dropout, attn_dropout:
         Residual/MLP dropout and attention dropout.
+    causal:
+        Restrict attention to the past (plus the CLS key at index 0).
     """
 
     def __init__(
@@ -60,11 +84,13 @@ class Encoder(nn.Module):
         mlp_ratio: float = 4.0,
         dropout: float = 0.0,
         attn_dropout: float = 0.0,
+        causal: bool = False,
     ) -> None:
         super().__init__()
         self.dim = dim
         self.depth = depth
         self.heads = heads
+        self.causal = causal
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.rope = RotaryEmbedding(dim // heads)
         self.blocks = nn.ModuleList(
@@ -75,7 +101,9 @@ class Encoder(nn.Module):
         nn.init.normal_(self.cls_token, std=0.02)
         self.apply(_init_linear)
 
-    def forward(self, tokens: Tensor, valid_mask: Tensor) -> EncoderOutput:
+    def forward(
+        self, tokens: Tensor, valid_mask: Tensor, return_penultimate: bool = False
+    ) -> EncoderOutput:
         """``tokens`` is ``(B, L, D)``; ``valid_mask`` is ``(B, L)`` and truthy on
         positions the encoder is allowed to attend to."""
         b, n, _ = tokens.shape
@@ -85,12 +113,28 @@ class Encoder(nn.Module):
         )
         # (B, 1, 1, L+1): key-side padding, broadcast over heads and queries.
         attn_mask = keep[:, None, None, :]
+        if self.causal:
+            # (L+1, L+1) lower triangle, intersected with the key padding. Every
+            # row keeps its own diagonal entry, so no row is fully masked.
+            tri = torch.ones(n + 1, n + 1, dtype=torch.bool, device=tokens.device).tril()
+            attn_mask = attn_mask & tri[None, None]
         cos, sin = self.rope(n + 1, tokens.device, x.dtype)
         cos, sin = cos[None, None], sin[None, None]
-        for block in self.blocks:
+        penultimate: Tensor | None = None
+        last = len(self.blocks) - 1
+        for i, block in enumerate(self.blocks):
+            if return_penultimate and i == last:
+                penultimate = x
             x = block(x, cos, sin, attn_mask)
         x = self.norm(x)
-        return EncoderOutput(cls=x[:, 0], tokens=x[:, 1:])
+        out = EncoderOutput(cls=x[:, 0], tokens=x[:, 1:])
+        if return_penultimate:
+            # For depth 1 there is no "block before the last", and the residual
+            # stream entering the only block -- the embedding -- is what falls out.
+            assert penultimate is not None
+            out["cls_penultimate"] = penultimate[:, 0]
+            out["tokens_penultimate"] = penultimate[:, 1:]
+        return out
 
 
 def _init_linear(module: nn.Module) -> None:

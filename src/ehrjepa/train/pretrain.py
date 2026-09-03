@@ -8,6 +8,13 @@ the target encoder. Everything else here is bookkeeping: a cosine schedule with
 linear warmup, gradient accumulation, resumable checkpoints, and per-step logging
 to CSV and TensorBoard.
 
+``objective.kind: ar`` swaps the middle of that sentence and nothing else. The
+model becomes :class:`~ehrjepa.models.ar.EHRAR` -- the same embedding and encoder,
+the encoder causal, a tied next-code head instead of a predictor -- and the step
+becomes forward, cross-entropy, backward. Data, sampler, optimizer, schedule,
+checkpoint format, diagnostics and logging path are the ones above, which is what
+makes a matched-compute comparison between the two objectives mean anything.
+
 The metrics worth watching are not the loss. A JEPA loss can fall to zero by
 collapse, so every ``log_every`` steps the loop also records, on the current
 batch's encoder outputs: the mean per-dimension standard deviation, the effective
@@ -34,7 +41,9 @@ from torch.utils.data import DataLoader
 from ehrjepa.data.cache import read_meta
 from ehrjepa.data.dataset import EventSequenceDataset, collate_events
 from ehrjepa.data.masking import sample_masks
+from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, JEPAOutput, ema_momentum
+from ehrjepa.objectives.ar import ARObjective
 from ehrjepa.objectives.loss import JEPAObjective, collapse_diagnostics
 from ehrjepa.train.config import PretrainConfig, load_config
 from ehrjepa.utils.runtime import (
@@ -48,12 +57,18 @@ from ehrjepa.utils.runtime import (
 __all__ = ["LOG_COLUMNS", "Trainer", "cosine_lr", "main"]
 
 #: CSV columns, in order. TensorBoard gets the same scalars under ``train/``.
+#: A run writes every column; the ones its objective does not produce stay empty
+#: (``pred_loss``/``sigreg_*`` for ``ar``, ``ce``/``top1``/``top10`` for ``jepa``),
+#: so one reader handles both kinds of ``metrics.csv``.
 LOG_COLUMNS = (
     "step",
     "loss",
     "pred_loss",
     "sigreg_tokens",
     "sigreg_cls",
+    "ce",
+    "top1",
+    "top10",
     "lr",
     "grad_norm",
     "tokens_per_s",
@@ -153,8 +168,19 @@ class Trainer:
             seed=run.seed,
         )
         self.model_config = config.model_config(int(self.meta["vocab_size"]))
-        self.model = EHRJEPA(self.model_config).to(self.device)
-        self.objective = JEPAObjective(config.objective).to(self.device)
+        self.kind = config.objective.kind
+        self.model: nn.Module
+        if self.kind == "ar":
+            if not self.model_config.causal:
+                # The AR objective is only defined against causal attention, and
+                # a bidirectional encoder would read the answer off its input.
+                print("[note] objective.kind=ar implies model.causal=true; enabling it", flush=True)
+                self.model_config.causal = True
+            self.model = EHRAR(self.model_config).to(self.device)
+            self.objective: nn.Module = ARObjective().to(self.device)
+        else:
+            self.model = EHRJEPA(self.model_config).to(self.device)
+            self.objective = JEPAObjective(config.objective).to(self.device)
         self.optimizer = torch.optim.AdamW(
             param_groups(self.model, config.optim.weight_decay),
             lr=config.optim.lr,
@@ -277,7 +303,10 @@ class Trainer:
 
     # ------------------------------------------------------------------ #
 
-    def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], JEPAOutput]:
+    def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], object]:
+        if self.kind == "ar":
+            output = self.model(batch)
+            return dict(self.objective(output.logits, output.targets)), output
         context_mask, target_mask = sample_masks(
             batch["attention_mask"].cpu(),
             p_future=self.config.masking.p_future,
@@ -289,6 +318,23 @@ class Trainer:
         output = self.model(batch, context_mask, target_mask)
         losses = self.objective(output)
         return losses, output
+
+    def _diagnostics(self, output: object) -> dict[str, float]:
+        """Collapse diagnostics for whichever forward just ran.
+
+        The AR head has no predicted/target latent pair, so ``cos_*`` is reported
+        as zero there; ``mean_std`` and ``effective_rank`` are computed on the
+        encoder's token outputs exactly as for JEPA.
+        """
+        if isinstance(output, JEPAOutput):
+            tokens, mask = output.context_tokens.detach(), output.context_mask
+            predictions, targets = output.predictions.detach(), output.targets
+        else:
+            tokens, mask = output.tokens.detach(), output.valid_mask  # type: ignore[attr-defined]
+            predictions = targets = tokens.new_zeros((0, tokens.shape[-1]))
+        return collapse_diagnostics(
+            tokens, mask, predictions, targets, generator=self.diag_generator
+        )
 
     def train(self) -> dict[str, float]:
         cfg = self.config
@@ -310,15 +356,15 @@ class Trainer:
                 group["lr"] = lr
 
             self.optimizer.zero_grad(set_to_none=True)
-            totals = {"loss": 0.0, "pred_loss": 0.0, "sigreg_tokens": 0.0, "sigreg_cls": 0.0}
-            output: JEPAOutput | None = None
+            totals: dict[str, float] = {}
+            output: object | None = None
             for _ in range(accum):
                 batch = self.to_device(next(batches))
                 with autocast_for(self.device, run.precision):
                     losses, output = self._forward(batch)
                 (losses["loss"] / accum).backward()
-                for key in totals:
-                    totals[key] += float(losses[key].detach()) / accum
+                for key, value in losses.items():
+                    totals[key] = totals.get(key, 0.0) + float(value.detach()) / accum
                 window_tokens += int(batch["attention_mask"].sum())
 
             grad_norm = float(
@@ -339,13 +385,7 @@ class Trainer:
             log_now = self.step % run.log_every == 0 or self.step == run.steps
             if log_now and output is not None:
                 now = time.perf_counter()
-                diagnostics = collapse_diagnostics(
-                    output.context_tokens.detach(),
-                    output.context_mask,
-                    output.predictions.detach(),
-                    output.targets,
-                    generator=self.diag_generator,
-                )
+                diagnostics = self._diagnostics(output)
                 row = {
                     "step": self.step,
                     **totals,
@@ -381,10 +421,15 @@ class Trainer:
             for name, value in row.items():
                 if name != "step" and isinstance(value, (int, float)) and math.isfinite(value):
                     self._writer.add_scalar(f"train/{name}", value, self.step)
+        if self.kind == "ar":
+            body = "ce {ce:.4f} top1 {top1:.3f} top10 {top10:.3f}"
+        else:
+            body = "pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} sig_cls {sigreg_cls:.4f}"
         print(
-            "step {step:>6} loss {loss:.4f} pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} "
-            "sig_cls {sigreg_cls:.4f} rank {effective_rank:.1f} std {mean_std:.3f} "
-            "cosgap {cos_gap:+.4f} tok/s {tokens_per_s:,.0f}".format(**row),
+            (
+                "step {step:>6} loss {loss:.4f} " + body + " rank {effective_rank:.1f} "
+                "std {mean_std:.3f} cosgap {cos_gap:+.4f} tok/s {tokens_per_s:,.0f}"
+            ).format(**row),
             flush=True,
         )
 
@@ -408,12 +453,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = load_config(args.config, args.override)
     trainer = Trainer(config)
     counts = trainer.model.n_parameters()
+    parts = " / ".join(
+        f"{name} {counts[name]:,}"
+        for name in ("embedding", "encoder", "predictor", "head")
+        if name in counts
+    )
     print(
-        f"device={trainer.device} vocab={trainer.meta['vocab_size']} "
+        f"device={trainer.device} objective={trainer.kind} vocab={trainer.meta['vocab_size']} "
         f"subjects={len(trainer.dataset)} (dropped {trainer.dataset.n_dropped}) "
-        f"params={counts['trainable']:,} "
-        f"(embed {counts['embedding']:,} / enc {counts['encoder']:,} "
-        f"/ pred {counts['predictor']:,})",
+        f"params={counts['trainable']:,} ({parts})",
         flush=True,
     )
     if config.run.resume:

@@ -49,10 +49,19 @@ def jepa_loss(predictions: Tensor, targets: Tensor, beta: float = 1.0) -> Tensor
     return F.smooth_l1_loss(predictions.float(), normed, beta=beta, reduction="mean")
 
 
+OBJECTIVE_KINDS = ("jepa", "ar")
+
+
 @dataclass
 class ObjectiveConfig:
-    """Loss hyper-parameters."""
+    """Loss hyper-parameters.
 
+    ``kind`` selects the pretraining objective: ``"jepa"`` (latent prediction plus
+    SIGReg, everything below) or ``"ar"`` (next-code cross-entropy, see
+    :mod:`ehrjepa.objectives.ar`, which uses none of the other fields).
+    """
+
+    kind: str = "jepa"
     lambda_sigreg: float = 0.05
     smooth_l1_beta: float = 1.0
     sigreg_directions: int = DEFAULT_N_DIRECTIONS
@@ -61,6 +70,10 @@ class ObjectiveConfig:
     sigreg_t_max: float = 5.0
     sigreg_sigma: float = 1.0
     sigreg_scale_by_n: bool = False
+
+    def __post_init__(self) -> None:
+        if self.kind not in OBJECTIVE_KINDS:
+            raise ValueError(f"objective.kind must be one of {OBJECTIVE_KINDS}, got {self.kind!r}")
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> ObjectiveConfig:

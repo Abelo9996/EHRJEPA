@@ -112,7 +112,7 @@ def test_five_step_run_on_the_debug_config_is_fast_and_logs(tmp_path: Path) -> N
     assert final["step"] == 5
     assert final["pred_loss"] > 0
     rows = (tmp_path / "metrics.csv").read_text().strip().splitlines()
-    assert rows[0].startswith("step,loss,pred_loss,sigreg_tokens,sigreg_cls,lr")
+    assert rows[0].startswith("step,loss,pred_loss,sigreg_tokens,sigreg_cls,ce,top1,top10,lr")
     assert len(rows) >= 2
     assert (tmp_path / "final.pt").exists()
     assert (tmp_path / "config.json").exists()

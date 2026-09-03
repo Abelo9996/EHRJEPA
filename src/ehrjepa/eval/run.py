@@ -85,14 +85,25 @@ class ModelSpec:
     kind: str  # "lr" | "gbm" | "probe"
     checkpoint: Path | None = None
     random_init: bool = False
+    probe_features: str = "cls_mean"
+    probe_layer: str = "final"
 
     @property
     def features(self) -> str:
-        return "counts" if self.kind in ("lr", "gbm") else "cls+mean"
+        if self.kind in ("lr", "gbm"):
+            return "counts"
+        return f"{self.probe_features}@{self.probe_layer}"
 
 
-def parse_models(specs: Sequence[str]) -> list[ModelSpec]:
+def parse_models(
+    specs: Sequence[str], probe_features: str = "cls_mean", probe_layer: str = "final"
+) -> list[ModelSpec]:
     """``lr``, ``gbm``, ``random_init``, ``ckpt:<path>`` -> :class:`ModelSpec`."""
+    if probe_features not in probe.PROBE_FEATURES:
+        raise ValueError(f"unknown probe features {probe_features!r}")
+    if probe_layer not in probe.PROBE_LAYERS:
+        raise ValueError(f"unknown probe layer {probe_layer!r}")
+    pooling = {"probe_features": probe_features, "probe_layer": probe_layer}
     out: list[ModelSpec] = []
     checkpoints = [s.split(":", 1)[1] for s in specs if s.startswith("ckpt:")]
     for spec in specs:
@@ -103,10 +114,12 @@ def parse_models(specs: Sequence[str]) -> list[ModelSpec]:
         elif spec == "random_init":
             if not checkpoints:
                 raise ValueError("random_init needs a ckpt: model to copy its architecture from")
-            out.append(ModelSpec("random_init", "probe", Path(checkpoints[0]), random_init=True))
+            out.append(
+                ModelSpec("random_init", "probe", Path(checkpoints[0]), random_init=True, **pooling)
+            )
         elif spec.startswith("ckpt:"):
             path = Path(spec.split(":", 1)[1])
-            out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path))
+            out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path, **pooling))
         else:
             raise ValueError(f"unknown model spec {spec!r}")
     return out
@@ -219,7 +232,11 @@ def evaluate_task(
             dense_for_few_shot = None
         else:
             cache = (
-                probe.embedding_path(feature_cache, source, spec.name) if feature_cache else None
+                probe.embedding_path(
+                    feature_cache, source, spec.name, spec.probe_features, spec.probe_layer
+                )
+                if feature_cache
+                else None
             )
             matrix = probe.embed_cached(
                 spec.checkpoint,
@@ -229,6 +246,8 @@ def evaluate_task(
                 random_init=spec.random_init,
                 device=device,
                 seed=seed,
+                features=spec.probe_features,
+                layer=spec.probe_layer,
             )
             x_tr, x_tu, x_ev = (
                 matrix[index["train"]],
@@ -412,6 +431,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "train/tuning are untouched",
     )
     parser.add_argument("--eval-subject-seed", type=int, default=0)
+    parser.add_argument(
+        "--probe-features",
+        default="cls_mean",
+        choices=sorted(probe.PROBE_FEATURES),
+        help="pooling for encoder probes; 'last' is the final valid token, "
+        "which is the informative row for causal (AR) checkpoints",
+    )
+    parser.add_argument(
+        "--probe-layer",
+        default="final",
+        choices=list(probe.PROBE_LAYERS),
+        help="'penultimate' reads the residual stream entering the last block",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -419,7 +451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     names = None if args.tasks == "all" else args.tasks.split(",")
     results = run(
         args.source,
-        parse_models(args.models.split(",")),
+        parse_models(args.models.split(","), args.probe_features, args.probe_layer),
         Path(args.out),
         meds_root=Path(args.meds_root),
         cache_root=Path(args.cache_root),
