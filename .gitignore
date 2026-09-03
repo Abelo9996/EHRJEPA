@@ -36,6 +36,10 @@ ENV/
 *.csv
 *.csv.gz
 
+# ...except the tiny synthetic fixtures the ETL tests run against. These are
+# hand-written, contain no real patient data, and must be tracked.
+!tests/fixtures/**
+
 # Runs, checkpoints, logs
 checkpoints/
 runs/
