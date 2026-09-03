@@ -13,3 +13,29 @@ into it. An EMA copy of the encoder serves as the target encoder. Also planned
 here: parameter-group helpers for weight decay, checkpoint save/load, and small
 named configurations (tiny/small/base) for scaling studies.
 """
+
+from ehrjepa.models.embedding import EventEmbedding
+from ehrjepa.models.encoder import Encoder, EncoderOutput
+from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig, JEPAOutput, ema_momentum
+from ehrjepa.models.layers import (
+    FourierFeatures,
+    RotaryEmbedding,
+    ScalarEncoder,
+    TransformerBlock,
+)
+from ehrjepa.models.predictor import Predictor
+
+__all__ = [
+    "EHRJEPA",
+    "EHRJEPAConfig",
+    "Encoder",
+    "EncoderOutput",
+    "EventEmbedding",
+    "FourierFeatures",
+    "JEPAOutput",
+    "Predictor",
+    "RotaryEmbedding",
+    "ScalarEncoder",
+    "TransformerBlock",
+    "ema_momentum",
+]
