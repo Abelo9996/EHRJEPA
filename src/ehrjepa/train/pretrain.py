@@ -34,7 +34,7 @@ from torch.utils.data import DataLoader
 from ehrjepa.data.cache import read_meta
 from ehrjepa.data.dataset import EventSequenceDataset, collate_events
 from ehrjepa.data.masking import sample_masks
-from ehrjepa.models.jepa import EHRJEPA, ema_momentum
+from ehrjepa.models.jepa import EHRJEPA, JEPAOutput, ema_momentum
 from ehrjepa.objectives.loss import JEPAObjective, collapse_diagnostics
 from ehrjepa.train.config import PretrainConfig, load_config
 from ehrjepa.utils.runtime import (
@@ -277,7 +277,7 @@ class Trainer:
 
     # ------------------------------------------------------------------ #
 
-    def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], object]:
+    def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], JEPAOutput]:
         context_mask, target_mask = sample_masks(
             batch["attention_mask"].cpu(),
             p_future=self.config.masking.p_future,
@@ -311,7 +311,7 @@ class Trainer:
 
             self.optimizer.zero_grad(set_to_none=True)
             totals = {"loss": 0.0, "pred_loss": 0.0, "sigreg_tokens": 0.0, "sigreg_cls": 0.0}
-            output = None
+            output: JEPAOutput | None = None
             for _ in range(accum):
                 batch = self.to_device(next(batches))
                 with autocast_for(self.device, run.precision):
