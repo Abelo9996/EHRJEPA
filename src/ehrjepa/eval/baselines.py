@@ -197,11 +197,16 @@ def fit_logistic(
     if scale:
         scaler = StandardScaler(with_mean=not sparse.issparse(x_train)).fit(x_train)
         x_train, x_tune = scaler.transform(x_train), scaler.transform(x_tune)
+    # Same L2 objective either way, but liblinear's coordinate descent is ~20x
+    # slower than lbfgs on the dense 512-column embedding probes (6.4s vs 0.3s
+    # per fit at 58k rows), while lbfgs is the slower of the two on the 110k
+    # sparse count columns.
+    solver = "liblinear" if sparse.issparse(x_train) else "lbfgs"
     best: tuple[float, LogisticRegression, dict] | None = None
     history = []
     for c in grid:
         model = LogisticRegression(
-            C=c, max_iter=2000, solver="liblinear", random_state=seed, class_weight=None
+            C=c, max_iter=2000, solver=solver, random_state=seed, class_weight=None
         )
         model.fit(x_train, y_train)
         score = auroc(y_tune, model.predict_proba(x_tune)[:, 1])

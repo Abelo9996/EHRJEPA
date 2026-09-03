@@ -205,7 +205,14 @@ def evaluate_task(
         predictions.append(
             anchors[index[eval_split]]
             .select("subject_id", "anchor_time", "label")
-            .with_columns(task=pl.lit(task_name), model=pl.lit(spec.name), score=pl.Series(p))
+            .with_columns(
+                task=pl.lit(task_name),
+                model=pl.lit(spec.name),
+                # float64 unconditionally: sklearn hands back the dtype of the
+                # feature matrix, so the dense probes would otherwise give
+                # float32 and refuse to stack with the sparse baselines.
+                score=pl.Series(np.asarray(p, dtype=np.float64)),
+            )
         )
         record = {
             "kind": spec.kind,
