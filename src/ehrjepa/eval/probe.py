@@ -15,11 +15,19 @@ Two knobs widen that, both defaulting to the behaviour above so every number
 already in ``docs/experiments/`` still reproduces:
 
 ``features``
-    ``cls_mean`` (``2 * dim``), ``last`` (``dim``, the final valid token), or
-    ``cls_mean_last`` (``3 * dim``). ``last`` exists for causal checkpoints, whose
-    CLS row sits at position 0 and can therefore see nothing but itself -- for
-    those the CLS half of ``cls_mean`` is a constant column and the useful
-    "summary of everything up to now" row is the last one.
+    ``cls_mean`` (``2 * dim``), ``mean`` (``dim``), ``last`` (``dim``, the final
+    valid token), or ``cls_mean_last`` (``3 * dim``). ``last`` exists for causal
+    checkpoints, whose CLS row sits at position 0 and can therefore see nothing
+    but itself -- for those the CLS half of ``cls_mean`` is a constant column and
+    the useful "summary of everything up to now" row is the last one.
+
+    The *default* is architecture-aware (:func:`default_features`): ``last`` for
+    a causal checkpoint, ``mean`` for a bidirectional one. Both halves of that
+    rule are measurements, not taste. On the phase-5a pilot, ``last`` beat
+    ``cls_mean`` by 2.5--3.3 AUROC points on the AR checkpoint; and a JEPA CLS row
+    is the row SIGReg regularises hardest toward isotropy, which is not the same
+    thing as the row a probe wants. ``cls_mean`` remains available and every
+    recorded number says which pooling produced it.
 ``layer``
     ``final`` (after the encoder's output LayerNorm) or ``penultimate`` (the
     residual stream entering the last block). Late layers of a self-supervised
@@ -49,8 +57,11 @@ from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig
 
 __all__ = [
+    "AUTO_FEATURES",
     "PROBE_FEATURES",
     "PROBE_LAYERS",
+    "checkpoint_is_causal",
+    "default_features",
     "embed",
     "embed_cached",
     "embedding_path",
@@ -63,10 +74,24 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 #: Pooling choices and the multiple of ``dim`` each produces.
-PROBE_FEATURES: dict[str, int] = {"cls_mean": 2, "last": 1, "cls_mean_last": 3}
+PROBE_FEATURES: dict[str, int] = {"cls_mean": 2, "mean": 1, "last": 1, "cls_mean_last": 3}
 
 #: Which encoder depth the features are read from.
 PROBE_LAYERS: tuple[str, ...] = ("final", "penultimate")
+
+#: The sentinel that asks for :func:`default_features` per checkpoint.
+AUTO_FEATURES = "auto"
+
+
+def default_features(causal: bool) -> str:
+    """The pooling to use when none was named: ``last`` if causal, else ``mean``."""
+    return "last" if causal else "mean"
+
+
+def checkpoint_is_causal(path: str | Path) -> bool:
+    """Whether a checkpoint's encoder attends causally, read off its model config."""
+    payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+    return bool(payload["model_config"].get("causal", False))
 
 
 def n_features(dim: int, features: str = "cls_mean") -> int:
@@ -199,6 +224,7 @@ def _pool(
     parts: list[torch.Tensor] = []
     if features in ("cls_mean", "cls_mean_last"):
         parts.append(cls)
+    if features in ("cls_mean", "cls_mean_last", "mean"):
         parts.append((hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0))
     if features in ("last", "cls_mean_last"):
         index = (attention_mask.sum(dim=1).long() - 1).clamp(min=0)

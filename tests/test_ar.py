@@ -283,7 +283,8 @@ def _anchor_frame(cache_dir: Path) -> pl.DataFrame:
 
 
 @pytest.mark.parametrize(
-    ("features", "multiple"), [("cls_mean", 2), ("last", 1), ("cls_mean_last", 3)]
+    ("features", "multiple"),
+    [("cls_mean", 2), ("mean", 1), ("last", 1), ("cls_mean_last", 3)],
 )
 @pytest.mark.parametrize("layer", ["final", "penultimate"])
 @requires_cache

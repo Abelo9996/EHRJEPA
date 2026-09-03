@@ -15,8 +15,11 @@ subset.
 
 A ``ckpt:`` model can be either pretraining objective: the checkpoint says which,
 and :func:`ehrjepa.eval.probe.load_encoder` builds the matching architecture.
-``--probe-features`` and ``--probe-layer`` choose how a frozen encoder is pooled;
-both default to what earlier runs used, so the recorded numbers reproduce.
+``--probe-features`` and ``--probe-layer`` choose how a frozen encoder is pooled.
+``--probe-features`` defaults to ``auto``, which resolves *per checkpoint* --
+``last`` for a causal encoder, ``mean`` for a bidirectional one -- and every
+model's row in ``results.json`` records the pooling it actually got, so a table
+that mixes the two says so.
 """
 
 from __future__ import annotations
@@ -118,14 +121,36 @@ class ModelSpec:
 
 
 def parse_models(
-    specs: Sequence[str], probe_features: str = "cls_mean", probe_layer: str = "final"
+    specs: Sequence[str],
+    probe_features: str = probe.AUTO_FEATURES,
+    probe_layer: str = "final",
 ) -> list[ModelSpec]:
-    """``lr``, ``gbm``, ``random_init``, ``ckpt:<path>`` -> :class:`ModelSpec`."""
-    if probe_features not in probe.PROBE_FEATURES:
+    """``lr``, ``gbm``, ``random_init``, ``ckpt:<path>`` -> :class:`ModelSpec`.
+
+    ``probe_features="auto"`` (the default) resolves per checkpoint: ``last`` for
+    a causal encoder, ``mean`` for a bidirectional one. That is a per-*model*
+    decision rather than a per-run one, so a grid that mixes objectives can score
+    every arm with the pooling that arm's architecture calls for, in one command,
+    and the choice is recorded on each row rather than assumed.
+    """
+    if probe_features != probe.AUTO_FEATURES and probe_features not in probe.PROBE_FEATURES:
         raise ValueError(f"unknown probe features {probe_features!r}")
     if probe_layer not in probe.PROBE_LAYERS:
         raise ValueError(f"unknown probe layer {probe_layer!r}")
-    pooling = {"probe_features": probe_features, "probe_layer": probe_layer}
+    causal: dict[str, bool] = {}
+
+    def pooling(path: Path) -> dict[str, str]:
+        features = probe_features
+        if features == probe.AUTO_FEATURES:
+            key = str(path)
+            if key not in causal:
+                # A path that is not there yet resolves as bidirectional; the
+                # real complaint comes from ``load_encoder`` a moment later, and
+                # it names the file.
+                causal[key] = path.exists() and probe.checkpoint_is_causal(path)
+            features = probe.default_features(causal[key])
+        return {"probe_features": features, "probe_layer": probe_layer}
+
     out: list[ModelSpec] = []
     checkpoints = [s.split(":", 1)[1] for s in specs if s.startswith("ckpt:")]
     for spec in specs:
@@ -136,12 +161,13 @@ def parse_models(
         elif spec == "random_init":
             if not checkpoints:
                 raise ValueError("random_init needs a ckpt: model to copy its architecture from")
+            copied = Path(checkpoints[0])
             out.append(
-                ModelSpec("random_init", "probe", Path(checkpoints[0]), random_init=True, **pooling)
+                ModelSpec("random_init", "probe", copied, random_init=True, **pooling(copied))
             )
         elif spec.startswith("ckpt:"):
             path = Path(spec.split(":", 1)[1])
-            out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path, **pooling))
+            out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path, **pooling(path)))
         else:
             raise ValueError(f"unknown model spec {spec!r}")
     return out
@@ -455,10 +481,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--eval-subject-seed", type=int, default=0)
     parser.add_argument(
         "--probe-features",
-        default="cls_mean",
-        choices=sorted(probe.PROBE_FEATURES),
-        help="pooling for encoder probes; 'last' is the final valid token, "
-        "which is the informative row for causal (AR) checkpoints",
+        default=probe.AUTO_FEATURES,
+        choices=[probe.AUTO_FEATURES, *sorted(probe.PROBE_FEATURES)],
+        help="pooling for encoder probes; the default 'auto' picks per checkpoint "
+        "-- 'last' (the final valid token) for a causal encoder, 'mean' for a "
+        "bidirectional one -- and the choice is recorded on every row",
     )
     parser.add_argument(
         "--probe-layer",

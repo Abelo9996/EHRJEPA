@@ -560,6 +560,42 @@ def test_restrict_eval_split_keeps_train_and_tuning_whole() -> None:
     assert run.restrict_eval_split(frame, "held_out", None, seed=0).height == frame.height
 
 
+def _stub_checkpoint(path: Path, causal: bool) -> Path:
+    """The smallest payload :func:`probe.checkpoint_is_causal` reads."""
+    import torch
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"model_config": {"causal": causal}}, path)
+    return path
+
+
+def test_default_pooling_follows_the_architecture(tmp_path: Path) -> None:
+    """``auto`` is ``last`` for a causal checkpoint and ``mean`` for a bidirectional one.
+
+    Resolved per model, not per run: one command scoring an AR arm and a JEPA arm
+    must give each the pooling its attention pattern calls for.
+    """
+    causal = _stub_checkpoint(tmp_path / "ar" / "final.pt", causal=True)
+    bidirectional = _stub_checkpoint(tmp_path / "jepa" / "final.pt", causal=False)
+
+    specs = run.parse_models([f"ckpt:{causal}", f"ckpt:{bidirectional}"])
+    assert [s.probe_features for s in specs] == ["last", "mean"]
+    assert [s.features for s in specs] == ["last@final", "mean@final"]
+
+    # The control copies the architecture it is a control for, pooling included.
+    with_control = run.parse_models([f"ckpt:{causal}", "random_init"])
+    assert with_control[-1].probe_features == "last"
+
+    # An explicit choice still wins everywhere.
+    pinned = run.parse_models([f"ckpt:{causal}", f"ckpt:{bidirectional}"], "cls_mean")
+    assert {s.probe_features for s in pinned} == {"cls_mean"}
+
+
+def test_unknown_pooling_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown probe features"):
+        run.parse_models(["ckpt:runs/x/final.pt"], "nonsense")
+
+
 def test_parse_models_rejects_random_init_without_an_architecture() -> None:
     with pytest.raises(ValueError, match="architecture"):
         run.parse_models(["lr", "random_init"])
