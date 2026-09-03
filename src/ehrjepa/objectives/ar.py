@@ -22,6 +22,17 @@ window has no successor and is dropped too. Only ``code_id`` is predicted --
 ``value_bin``, ``value_z``, ``age`` and ``log_delta`` remain inputs, never
 targets, which keeps the objective one softmax rather than a multi-task blend
 whose weighting would be another knob to defend.
+
+**Why the loss is chunked.** A 30,000-code softmax over the ~8,000 real positions
+in a 64 x 256 batch is a 0.97 GB logit tensor, and autograd keeps it, its
+log-softmax and its gradient alive at once. Measured on the M4: 13.3 GB peak and
+1.6k tok/s, against 3.3 GB and 12.2k tok/s for the JEPA arm on the same config --
+the AR run was not compute-bound, it was thrashing a 16 GB machine. So the head
+is applied in slices under :func:`torch.utils.checkpoint.checkpoint`: each slice's
+logits are freed as soon as its loss is accumulated and recomputed during
+backward. Peak becomes ``chunk x vocab`` (245 MB at the default 2,048) at the
+cost of one extra head forward, and the arithmetic is unchanged --
+``test_chunked_and_dense_losses_agree`` pins that.
 """
 
 from __future__ import annotations
@@ -29,10 +40,22 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.checkpoint import checkpoint
 
 from ehrjepa.data.tokenize import PAD_ID
 
-__all__ = ["ARObjective", "ARStats", "NextCodeHead", "ar_loss", "next_code_targets"]
+__all__ = [
+    "AR_CHUNK",
+    "ARObjective",
+    "ARStats",
+    "NextCodeHead",
+    "ar_loss",
+    "ar_loss_chunked",
+    "next_code_targets",
+]
+
+#: Positions per head slice. 2,048 x 30,000 logits is 245 MB in float32.
+AR_CHUNK = 2048
 
 
 class NextCodeHead(nn.Module):
@@ -132,12 +155,63 @@ def ar_loss(logits: Tensor, targets: Tensor, top_k: tuple[int, ...] = (1, 10)) -
     return stats
 
 
+def ar_loss_chunked(
+    head: nn.Module,
+    hidden: Tensor,
+    targets: Tensor,
+    chunk: int = AR_CHUNK,
+    top_k: tuple[int, ...] = (1, 10),
+) -> ARStats:
+    """:func:`ar_loss`, with the vocabulary projection applied ``chunk`` rows at a time.
+
+    ``hidden`` is ``(N, dim)`` and ``targets`` ``(N,)``, both already gathered to
+    scored positions -- see :class:`~ehrjepa.models.ar.EHRAR`. The result is
+    numerically the mean cross-entropy over all ``N`` rows, not a mean of
+    per-chunk means: each slice contributes its *sum* and the division happens
+    once, so the value does not depend on where the slice boundaries fall.
+    """
+    n = int(hidden.shape[0])
+    stats = ARStats(n_targets=torch.as_tensor(float(n)))
+    if n == 0:
+        zero = hidden.new_zeros(())
+        stats.update(loss=zero, ce=zero.detach(), **{f"top{k}": zero.detach() for k in top_k})
+        return stats
+    if chunk <= 0 or n <= chunk:
+        return ar_loss(head(hidden), targets, top_k=top_k)
+
+    total = hidden.new_zeros(())
+    hits = dict.fromkeys(top_k, 0.0)
+    largest = max(top_k)
+    for start in range(0, n, chunk):
+        rows = hidden[start : start + chunk]
+        gold = targets[start : start + chunk]
+        # Recomputation only buys anything when there is a backward pass to feed;
+        # under ``no_grad`` ``checkpoint`` merely warns and calls straight through.
+        if torch.is_grad_enabled() and rows.requires_grad:
+            logits = checkpoint(head, rows, use_reentrant=False).float()
+        else:
+            logits = head(rows).float()
+        total = total + F.cross_entropy(logits, gold, reduction="sum")
+        with torch.no_grad():
+            ranked = logits.detach().topk(min(largest, logits.shape[-1]), dim=-1).indices
+            hit = ranked == gold[:, None]
+            for k in top_k:
+                hits[k] += float(hit[:, :k].any(dim=-1).sum())
+    ce = total / n
+    stats["loss"] = ce
+    stats["ce"] = ce.detach()
+    for k in top_k:
+        stats[f"top{k}"] = torch.as_tensor(hits[k] / n)
+    return stats
+
+
 class ARObjective(nn.Module):
     """Module wrapper so the trainer can hold the AR loss the way it holds JEPA's."""
 
-    def __init__(self, top_k: tuple[int, ...] = (1, 10)) -> None:
+    def __init__(self, chunk: int = AR_CHUNK, top_k: tuple[int, ...] = (1, 10)) -> None:
         super().__init__()
+        self.chunk = chunk
         self.top_k = top_k
 
-    def forward(self, logits: Tensor, targets: Tensor) -> ARStats:
-        return ar_loss(logits, targets, top_k=self.top_k)
+    def forward(self, head: nn.Module, hidden: Tensor, targets: Tensor) -> ARStats:
+        return ar_loss_chunked(head, hidden, targets, chunk=self.chunk, top_k=self.top_k)

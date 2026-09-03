@@ -177,7 +177,7 @@ class Trainer:
                 print("[note] objective.kind=ar implies model.causal=true; enabling it", flush=True)
                 self.model_config.causal = True
             self.model = EHRAR(self.model_config).to(self.device)
-            self.objective: nn.Module = ARObjective().to(self.device)
+            self.objective: nn.Module = ARObjective(chunk=config.objective.ar_chunk).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
             self.objective = JEPAObjective(config.objective).to(self.device)
@@ -306,7 +306,8 @@ class Trainer:
     def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], object]:
         if self.kind == "ar":
             output = self.model(batch)
-            return dict(self.objective(output.logits, output.targets)), output
+            stats = self.objective(self.model.head, output.hidden, output.targets)
+            return dict(stats), output
         context_mask, target_mask = sample_masks(
             batch["attention_mask"].cpu(),
             p_future=self.config.masking.p_future,

@@ -10,10 +10,11 @@ file, a checkpoint payload and the probe can treat the two interchangeably; the
 ``pred_*`` fields are simply unused here, and ``causal``/``tie_embeddings`` are
 unused by ``EHRJEPA``.
 
-Only the positions that actually have a next event are projected to the
-vocabulary. At batch 64 x 512 with a 30,000-code vocabulary a dense
-``(B, L, V)`` logit tensor is 3.9 GB in float32, which does not belong on a 16 GB
-laptop; gathering first makes the head cost proportional to real events.
+Only the positions that actually have a next event reach the vocabulary at all,
+and this module stops one matmul short of them: ``forward`` returns the gathered
+hidden rows, and :func:`~ehrjepa.objectives.ar.ar_loss_chunked` projects those in
+slices. At batch 64 x 512 with a 30,000-code vocabulary a dense ``(B, L, V)``
+logit tensor is 3.9 GB in float32, which does not belong on a 16 GB laptop.
 """
 
 from __future__ import annotations
@@ -35,9 +36,15 @@ __all__ = ["AROutput", "EHRAR"]
 
 @dataclass
 class AROutput:
-    """One forward pass: gathered logits and their targets, plus the encoder outputs."""
+    """One forward pass: the scored hidden rows and their targets, plus the encoder's.
 
-    logits: Tensor  # (n_targets, vocab_size)
+    ``hidden`` stops one matmul short of logits on purpose. The loss projects it
+    in slices (see :func:`~ehrjepa.objectives.ar.ar_loss_chunked`), and a
+    ``(n_targets, 30000)`` tensor returned from here would be exactly the
+    allocation that trick exists to avoid.
+    """
+
+    hidden: Tensor  # (n_targets, dim)
     targets: Tensor  # (n_targets,)
     tokens: Tensor  # (B, L, dim)
     cls: Tensor  # (B, dim)
@@ -129,7 +136,7 @@ class EHRAR(nn.Module):
         targets = next_code_targets(batch["code_id"], valid)
         keep = targets != PAD_ID
         return AROutput(
-            logits=self.head(encoded.tokens[keep]),
+            hidden=encoded.tokens[keep],
             targets=targets[keep],
             tokens=encoded.tokens,
             cls=encoded.cls,

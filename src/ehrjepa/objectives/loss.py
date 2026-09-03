@@ -62,6 +62,9 @@ class ObjectiveConfig:
     """
 
     kind: str = "jepa"
+    #: AR only: positions per slice of the vocabulary projection. See
+    #: :func:`ehrjepa.objectives.ar.ar_loss_chunked`.
+    ar_chunk: int = 2048
     lambda_sigreg: float = 0.05
     smooth_l1_beta: float = 1.0
     sigreg_directions: int = DEFAULT_N_DIRECTIONS

@@ -21,7 +21,7 @@ from ehrjepa.data.tokenize import PAD_ID
 from ehrjepa.eval import probe
 from ehrjepa.models import EHRAR, EHRJEPAConfig
 from ehrjepa.models.encoder import Encoder
-from ehrjepa.objectives.ar import ar_loss, next_code_targets
+from ehrjepa.objectives.ar import NextCodeHead, ar_loss, ar_loss_chunked, next_code_targets
 from ehrjepa.train.config import load_config
 from ehrjepa.train.pretrain import Trainer
 
@@ -144,7 +144,7 @@ def test_ar_model_predictions_do_not_see_their_own_target_event() -> None:
     # Row 0 contributes targets for positions 0..L-2; only those at index >= 9
     # (whose input window reaches event 10) may move.
     per_row = batch["attention_mask"][0].sum().item() - 1
-    assert torch.allclose(base.logits[:9], after.logits[:9], atol=1e-5)
+    assert torch.allclose(base.hidden[:9], after.hidden[:9], atol=1e-5)
     assert per_row > 9
 
 
@@ -170,7 +170,7 @@ def test_tied_head_shares_the_code_table_and_does_not_duplicate_it() -> None:
     assert counts["head"] == 2 * 32 + VOCAB
     assert counts["predictor"] == 0
     out = model(_batch())
-    assert out.logits.shape[1] == VOCAB
+    assert model.head(out.hidden).shape[1] == VOCAB
 
 
 def test_untied_head_allocates_its_own_projection() -> None:
@@ -179,7 +179,7 @@ def test_untied_head_allocates_its_own_projection() -> None:
     assert model.head.weight.shape == (VOCAB, 32)
     counts = model.n_parameters()
     assert counts["head"] == 2 * 32 + VOCAB + VOCAB * 32
-    assert model(_batch()).logits.shape[1] == VOCAB
+    assert model.head(model(_batch()).hidden).shape[1] == VOCAB
 
 
 def test_next_code_targets_shift_by_one_and_stop_at_padding() -> None:
@@ -215,6 +215,40 @@ def test_ar_loss_on_an_all_pad_batch_is_zero_and_finite() -> None:
     assert int(stats["n_targets"]) == 0
     assert float(stats["loss"]) == 0.0
     assert torch.isfinite(stats["loss"])
+
+
+def test_chunked_and_dense_losses_agree_in_value_and_in_gradient() -> None:
+    """The memory trick must not be an arithmetic change.
+
+    Slice boundaries are irrelevant because each chunk contributes its *sum* and
+    the division by ``N`` happens once; a per-chunk mean would drift whenever the
+    last slice is short, which is exactly the bug this pins.
+    """
+    torch.manual_seed(0)
+    head = NextCodeHead(16, 40)
+    hidden = torch.randn(37, 16, requires_grad=True)
+    targets = torch.randint(1, 40, (37,))
+
+    dense = ar_loss(head(hidden), targets)
+    dense["loss"].backward()
+    dense_grad = hidden.grad.clone()
+    hidden.grad = None
+
+    chunked = ar_loss_chunked(head, hidden, targets, chunk=8)
+    chunked["loss"].backward()
+
+    assert torch.allclose(dense["ce"], chunked["ce"], atol=1e-6)
+    assert torch.allclose(dense["top1"], chunked["top1"], atol=1e-6)
+    assert torch.allclose(dense["top10"], chunked["top10"], atol=1e-6)
+    assert torch.allclose(dense_grad, hidden.grad, atol=1e-6)
+
+
+def test_chunked_loss_handles_an_empty_batch_and_a_single_slice() -> None:
+    head = NextCodeHead(16, 40)
+    empty = ar_loss_chunked(head, torch.zeros(0, 16), torch.zeros(0, dtype=torch.long), chunk=8)
+    assert float(empty["loss"]) == 0.0 and int(empty["n_targets"]) == 0
+    small = ar_loss_chunked(head, torch.randn(5, 16), torch.randint(1, 40, (5,)), chunk=64)
+    assert int(small["n_targets"]) == 5
 
 
 def test_ar_top_k_accuracy_is_exact_on_a_constructed_ranking() -> None:
