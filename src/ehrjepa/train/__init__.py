@@ -12,3 +12,21 @@ JSONL metric logging so runs stay inspectable without a tracking service. The
 loop is written single-process first; distributed support, if added, will be
 plain ``torchrun`` + DDP.
 """
+
+from ehrjepa.train.config import (
+    DataConfig,
+    MaskingConfig,
+    OptimConfig,
+    PretrainConfig,
+    RunConfig,
+    load_config,
+)
+
+__all__ = [
+    "DataConfig",
+    "MaskingConfig",
+    "OptimConfig",
+    "PretrainConfig",
+    "RunConfig",
+    "load_config",
+]

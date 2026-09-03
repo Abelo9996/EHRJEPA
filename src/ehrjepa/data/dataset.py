@@ -122,6 +122,18 @@ class EventSequenceDataset(torch.utils.data.Dataset):
             self._rng = np.random.default_rng((self.seed, torch.initial_seed()))
         return self._rng
 
+    def rng_state(self) -> dict[str, object]:
+        """The window-sampler RNG state, so a run can be checkpointed and resumed.
+
+        Only meaningful with ``num_workers=0``; worker processes have their own
+        generators, seeded per worker and per epoch, which the parent cannot see.
+        """
+        return dict(self._generator().bit_generator.state)
+
+    def set_rng_state(self, state: Mapping[str, object]) -> None:
+        """Restore a state returned by :meth:`rng_state`."""
+        self._generator().bit_generator.state = dict(state)
+
     def _slice(self, start: int, stop: int, subject_id: int) -> dict[str, torch.Tensor]:
         item: dict[str, torch.Tensor] = {}
         for name, array in self._arrays.items():

@@ -10,3 +10,19 @@ in it may import from :mod:`ehrjepa.models` or :mod:`ehrjepa.train`, so that the
 data and evaluation layers can use it without pulling in torch modules they do
 not need.
 """
+
+from ehrjepa.utils.runtime import (
+    autocast_for,
+    peak_memory_bytes,
+    resolve_device,
+    seed_everything,
+    supports_bf16_autocast,
+)
+
+__all__ = [
+    "autocast_for",
+    "peak_memory_bytes",
+    "resolve_device",
+    "seed_everything",
+    "supports_bf16_autocast",
+]

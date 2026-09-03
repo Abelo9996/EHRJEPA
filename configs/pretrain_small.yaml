@@ -1,0 +1,67 @@
+# Small pretraining run: 6-layer / 256-wide encoder, 4-layer / 128-wide predictor.
+# Sized to fit comfortably on a 16 GB M4 (MPS) at max_len 512, batch 32.
+
+data:
+  cache_dir: data/cache/desynpuf-s1
+  split: train
+  max_len: 512
+  min_len: 16
+  sampling: random_window
+  num_workers: 0
+
+model:
+  dim: 256
+  depth: 6
+  heads: 4
+  mlp: swiglu
+  mlp_ratio: 4.0
+  dropout: 0.1
+  attn_dropout: 0.0
+  n_freq: 16
+  pred_dim: 128
+  pred_depth: 4
+  pred_heads: 4
+  target_mode: shared     # "shared" (LeJEPA) or "ema" (V-JEPA 2)
+  ema_start: 0.996
+  ema_end: 1.0
+
+objective:
+  lambda_sigreg: 0.05     # LeJEPA's reported robust default
+  smooth_l1_beta: 1.0
+  sigreg_directions: 256  # the paper uses 1024; 256 is the MPS-throughput trade
+  sigreg_max_rows: 8192
+  sigreg_grid: 17         # the paper's grid: 17 trapezoid points on [-5, 5]
+  sigreg_t_max: 5.0
+  sigreg_sigma: 1.0
+
+masking:
+  p_future: 0.6
+  future_min_span: 8
+  future_max_span: 64
+  future_cut_low: 0.3
+  future_cut_high: 0.9
+  block_min_blocks: 2
+  block_max_blocks: 4
+  block_block_low: 0.05
+  block_block_high: 0.15
+  block_context_drop: 0.3
+
+optim:
+  lr: 3.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  warmup_steps: 100
+  min_lr_ratio: 0.01
+  grad_clip: 1.0
+  accum_steps: 1
+
+run:
+  steps: 2000
+  batch_size: 32
+  seed: 20240917
+  device: auto
+  precision: auto         # bf16 on CUDA, float32 on MPS/CPU
+  out_dir: runs/pretrain_small
+  log_every: 10
+  ckpt_every: 500
+  tensorboard: true

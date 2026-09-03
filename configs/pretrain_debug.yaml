@@ -1,0 +1,47 @@
+# Tiny config for tests and CI: 50 steps, CPU-sized, seconds not minutes.
+
+data:
+  cache_dir: data/cache/mimic-demo
+  split: train
+  max_len: 64
+  min_len: 8
+  sampling: random_window
+  num_workers: 0
+
+model:
+  dim: 32
+  depth: 2
+  heads: 2
+  mlp: gelu
+  mlp_ratio: 2.0
+  dropout: 0.0
+  n_freq: 8
+  pred_dim: 16
+  pred_depth: 1
+  pred_heads: 2
+  target_mode: shared
+
+objective:
+  lambda_sigreg: 0.05
+  sigreg_directions: 32
+  sigreg_max_rows: 512
+
+masking:
+  p_future: 0.6
+  future_max_span: 16
+
+optim:
+  lr: 3.0e-4
+  warmup_steps: 5
+  grad_clip: 1.0
+
+run:
+  steps: 50
+  batch_size: 4
+  seed: 0
+  device: cpu
+  precision: fp32
+  out_dir: runs/pretrain_debug
+  log_every: 10
+  ckpt_every: 0
+  tensorboard: false
