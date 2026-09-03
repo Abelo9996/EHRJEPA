@@ -49,6 +49,54 @@
         "new_dx_365d/copd": 0.6991458839605967
       },
       "finished": "2026-09-03T16:32:32+00:00"
+    },
+    {
+      "run": "micro_jepa_ema",
+      "objective": "jepa",
+      "target_mode": "ema",
+      "lambda_sigreg": 0.05,
+      "p_future": 0.6,
+      "steps": 200,
+      "tokens": 3276800,
+      "batch_size": 64,
+      "max_len": 256,
+      "overrides": {
+        "objective.kind": "jepa",
+        "model.target_mode": "ema",
+        "objective.lambda_sigreg": 0.05
+      },
+      "final": {
+        "step": 200.0,
+        "loss": 0.21051029860973358,
+        "pred_loss": 0.20942020416259766,
+        "sigreg_tokens": 0.007281065918505192,
+        "sigreg_cls": 0.01452090684324503,
+        "ce": NaN,
+        "top1": NaN,
+        "top10": NaN,
+        "lr": 3.0732757856888576e-06,
+        "grad_norm": 0.08175858110189438,
+        "tokens_per_s": 9011.399726863965,
+        "mean_std": 0.9798557162284851,
+        "effective_rank": 143.72567749023438,
+        "cos_real": 0.7613867521286011,
+        "cos_shuffled": 0.671525776386261,
+        "cos_gap": 0.08986097574234009,
+        "ema_momentum": 0.99998,
+        "peak_memory_mb": 3304.125,
+        "elapsed_s": 180.25541766703827,
+        "wall_s": 183.5
+      },
+      "auroc": {
+        "mortality_365d": 0.6162287496643325,
+        "inpatient_365d": 0.6701332027112387,
+        "readmission_30d": 0.6267034039649748,
+        "new_dx_365d/diabetes": 0.7147791891670757,
+        "new_dx_365d/heart_failure": 0.689618909874173,
+        "new_dx_365d/ckd": 0.6917884764923844,
+        "new_dx_365d/copd": 0.6906253094001779
+      },
+      "finished": "2026-09-03T16:41:42+00:00"
     }
   ],
   "baselines": {
@@ -78,10 +126,19 @@
       "new_dx_365d/diabetes": 0.7372137590001636,
       "new_dx_365d/heart_failure": 0.6993418721730248,
       "readmission_30d": 0.6522189265001327
+    },
+    "random_init@micro_jepa_ema": {
+      "inpatient_365d": 0.6723460987372968,
+      "mortality_365d": 0.5913377125033566,
+      "new_dx_365d/ckd": 0.7003693936084251,
+      "new_dx_365d/copd": 0.7002349725865316,
+      "new_dx_365d/diabetes": 0.7372137590001636,
+      "new_dx_365d/heart_failure": 0.6993418721730248,
+      "readmission_30d": 0.6522189265001327
     }
   },
   "source": "desynpuf-s1",
-  "updated": "2026-09-03T16:32:32+00:00",
+  "updated": "2026-09-03T16:41:42+00:00",
   "eval": {
     "bootstrap": 200,
     "eval_subject_limit": 3000,

@@ -99,6 +99,23 @@ class ModelSpec:
             return "counts"
         return f"{self.probe_features}@{self.probe_layer}"
 
+    @property
+    def cache_name(self) -> str:
+        """Cache identity, which is not the display name for ``random_init``.
+
+        Every ``ckpt:<path>`` spec is already named after its run directory, so
+        two checkpoints never share a cache file. ``random_init`` is not: it is
+        named after what it *is*, and its vectors depend entirely on the
+        architecture it copies from the checkpoint it was given. Keyed on the
+        display name alone, an untrained 4x192 encoder would silently read back
+        an untrained 6x256 one cached by an earlier experiment -- which is a
+        control that controls for nothing, and which produces AUROCs that look
+        perfectly plausible.
+        """
+        if self.random_init and self.checkpoint is not None:
+            return f"random_init@{self.checkpoint.parent.name}"
+        return self.name
+
 
 def parse_models(
     specs: Sequence[str], probe_features: str = "cls_mean", probe_layer: str = "final"
@@ -238,7 +255,7 @@ def evaluate_task(
         else:
             cache = (
                 probe.embedding_path(
-                    feature_cache, source, spec.name, spec.probe_features, spec.probe_layer
+                    feature_cache, source, spec.cache_name, spec.probe_features, spec.probe_layer
                 )
                 if feature_cache
                 else None

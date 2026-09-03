@@ -634,3 +634,30 @@ def test_anchor_times_line_up_with_the_tensor_cache() -> None:
             & (pl.col("event_time") < row["anchor_time"])
         ).height
         assert history["code_id"].size == expected
+
+
+def test_random_init_cache_name_is_keyed_on_the_architecture_it_copies() -> None:
+    """Two grids' untrained controls must not collide in the embedding cache.
+
+    ``random_init`` is named after what it is, not after the checkpoint it copies
+    its architecture from, so a cache keyed on the display name hands a 4x192
+    grid the untrained 6x256 vectors an earlier experiment left behind -- a
+    control that controls for nothing, with entirely plausible-looking AUROCs.
+    Caught by the phase-5a micro-grid, where both cells' controls came back
+    identical to each other and to the phase-4 numbers.
+    """
+    from ehrjepa.eval.probe import embedding_path
+    from ehrjepa.eval.run import parse_models
+
+    pilot = parse_models(["random_init", "ckpt:runs/pilot/ar/final.pt"])[0]
+    sanity = parse_models(["random_init", "ckpt:runs/sanity-A-default/final.pt"])[0]
+    assert pilot.name == sanity.name == "random_init", "the display name stays stable"
+    assert pilot.cache_name == "random_init@ar"
+    assert sanity.cache_name == "random_init@sanity-A-default"
+    assert embedding_path("c", "src", pilot.cache_name) != embedding_path(
+        "c", "src", sanity.cache_name
+    )
+
+    # A trained checkpoint is already named after its run directory.
+    trained = parse_models(["ckpt:runs/pilot/ar/final.pt"])[0]
+    assert trained.cache_name == trained.name == "ckpt:ar"
