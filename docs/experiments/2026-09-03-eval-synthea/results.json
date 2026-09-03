@@ -7,8 +7,8 @@
   "anchor_seed": 20260903,
   "n_boot": 1000,
   "seed": 0,
-  "commit": "42e7b15",
-  "created": "2026-09-03T10:35:07+00:00",
+  "commit": "3c7c019",
+  "created": "2026-09-03T10:37:35+00:00",
   "models": {
     "lr": {
       "kind": "lr",
@@ -72,7 +72,7 @@
           ],
           "tuning_auroc": 0.8997435897435897,
           "n_features": 887,
-          "fit_seconds": 0.55,
+          "fit_seconds": 0.12,
           "metrics": {
             "auroc": {
               "point": 0.8673835125448028,
@@ -167,7 +167,7 @@
           ],
           "tuning_auroc": 0.9643589743589743,
           "n_features": 887,
-          "fit_seconds": 4.87,
+          "fit_seconds": 2.97,
           "metrics": {
             "auroc": {
               "point": 0.9311827956989247,
@@ -189,9 +189,9 @@
             },
             "calibration_slope": {
               "point": 0.677731040838907,
-              "lo": 0.5339362391842103,
-              "hi": 0.9450201326647134,
-              "n_boot_valid": 1000
+              "lo": 0.5339152131438196,
+              "hi": 0.9447776479495271,
+              "n_boot_valid": 999
             }
           }
         }
@@ -255,7 +255,7 @@
           ],
           "tuning_auroc": 0.9079476861167002,
           "n_features": 887,
-          "fit_seconds": 0.49,
+          "fit_seconds": 0.11,
           "metrics": {
             "auroc": {
               "point": 0.8791066814322629,
@@ -350,7 +350,7 @@
           ],
           "tuning_auroc": 0.903588195841717,
           "n_features": 887,
-          "fit_seconds": 4.91,
+          "fit_seconds": 2.96,
           "metrics": {
             "auroc": {
               "point": 0.917220376522702,
@@ -371,10 +371,10 @@
               "n_boot_valid": 1000
             },
             "calibration_slope": {
-              "point": 23706945064.353027,
-              "lo": 0.5583828996018337,
-              "hi": 60530222560.077484,
-              "n_boot_valid": 1000
+              "point": NaN,
+              "lo": 0.5584852603849,
+              "hi": 0.8711417059587976,
+              "n_boot_valid": 511
             }
           }
         }
@@ -486,7 +486,7 @@
           ],
           "tuning_auroc": 0.8938906752411575,
           "n_features": 859,
-          "fit_seconds": 0.43,
+          "fit_seconds": 0.05,
           "metrics": {
             "auroc": {
               "point": 0.2941176470588235,
@@ -507,10 +507,10 @@
               "n_boot_valid": 1000
             },
             "calibration_slope": {
-              "point": -44035531183.48341,
-              "lo": -58369117919.99179,
-              "hi": 31216643062.383076,
-              "n_boot_valid": 639
+              "point": NaN,
+              "lo": NaN,
+              "hi": NaN,
+              "n_boot_valid": 0
             }
           },
           "few_shot": [
@@ -581,7 +581,7 @@
           ],
           "tuning_auroc": 0.987138263665595,
           "n_features": 859,
-          "fit_seconds": 2.8,
+          "fit_seconds": 2.3,
           "metrics": {
             "auroc": {
               "point": 0.6873065015479877,
@@ -602,10 +602,10 @@
               "n_boot_valid": 1000
             },
             "calibration_slope": {
-              "point": 117793670151.07771,
-              "lo": -50982443487.16461,
-              "hi": 143910704680.7381,
-              "n_boot_valid": 639
+              "point": NaN,
+              "lo": NaN,
+              "hi": NaN,
+              "n_boot_valid": 0
             }
           }
         }
@@ -625,5 +625,5 @@
       "dropped_not_in_cache": 0
     }
   },
-  "runtime_seconds": 34.7
+  "runtime_seconds": 17.9
 }

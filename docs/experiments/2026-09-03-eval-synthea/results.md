@@ -9,9 +9,9 @@ Metrics are on the `held_out` split. Intervals are percentile bootstrap over sub
 | cache | `data/cache/synthea-coherent` |
 | tasks | `data/tasks/synthea-coherent` |
 | anchor seed | 20260903 |
-| commit | `42e7b15` |
-| created | 2026-09-03T10:35:07+00:00 |
-| runtime (s) | 34.7 |
+| commit | `3c7c019` |
+| created | 2026-09-03T10:37:35+00:00 |
+| runtime (s) | 17.9 |
 
 ## Models
 
@@ -69,11 +69,11 @@ Metrics are on the `held_out` split. Intervals are percentile bootstrap over sub
 | task | lr | gbm |
 |---|---|---|
 | `mortality_365d` | 0.984 [0.702, 1.382] | 0.678 [0.534, 0.945] |
-| `inpatient_365d` | 0.836 [0.640, 1.129] | 23706945064.353 [0.558, 60530222560.077] |
+| `inpatient_365d` | 0.836 [0.640, 1.129] | -- |
 | `new_dx_365d/diabetes` | -- | -- |
 | `new_dx_365d/heart_failure` | -- | -- |
 | `new_dx_365d/ckd` | -- | -- |
-| `new_dx_365d/copd` | -44035531183.483 [-58369117919.992, 31216643062.383] | 117793670151.078 [-50982443487.165, 143910704680.738] |
+| `new_dx_365d/copd` | -- | -- |
 
 ## Paired bootstrap (AUROC difference, identical subjects)
 
