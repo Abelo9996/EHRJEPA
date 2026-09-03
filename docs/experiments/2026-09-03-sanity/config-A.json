@@ -1,0 +1,77 @@
+{
+  "data": {
+    "cache_dir": "data/cache/desynpuf-s1",
+    "split": "train",
+    "max_len": 512,
+    "min_len": 16,
+    "sampling": "random_window",
+    "num_workers": 0,
+    "prefetch_factor": null
+  },
+  "model": {
+    "dim": 256,
+    "depth": 6,
+    "heads": 4,
+    "mlp": "swiglu",
+    "mlp_ratio": 4.0,
+    "dropout": 0.1,
+    "attn_dropout": 0.0,
+    "n_freq": 16,
+    "pred_dim": 128,
+    "pred_depth": 4,
+    "pred_heads": 4,
+    "target_mode": "shared",
+    "ema_start": 0.996,
+    "ema_end": 1.0
+  },
+  "objective": {
+    "lambda_sigreg": 0.05,
+    "smooth_l1_beta": 1.0,
+    "sigreg_directions": 256,
+    "sigreg_max_rows": 8192,
+    "sigreg_grid": 17,
+    "sigreg_t_max": 5.0,
+    "sigreg_sigma": 1.0,
+    "sigreg_scale_by_n": false
+  },
+  "masking": {
+    "p_future": 0.6,
+    "future_min_span": 8,
+    "future_max_span": 64,
+    "future_cut_low": 0.3,
+    "future_cut_high": 0.9,
+    "block_min_blocks": 2,
+    "block_max_blocks": 4,
+    "block_block_low": 0.05,
+    "block_block_high": 0.15,
+    "block_context_drop": 0.3
+  },
+  "optim": {
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "betas": [
+      0.9,
+      0.95
+    ],
+    "eps": 1e-08,
+    "warmup_steps": 100,
+    "min_lr_ratio": 0.01,
+    "grad_clip": 1.0,
+    "accum_steps": 1
+  },
+  "run": {
+    "steps": 900,
+    "batch_size": 32,
+    "seed": 20240917,
+    "device": "auto",
+    "precision": "auto",
+    "out_dir": "runs/sanity-A-default",
+    "log_every": 25,
+    "ckpt_every": 0,
+    "diagnostics_every": 0,
+    "tensorboard": true,
+    "max_seconds": 1150.0,
+    "resume": null,
+    "compile": false
+  }
+}
