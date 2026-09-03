@@ -1,0 +1,126 @@
+# Phase 5b: is the JEPA prediction task soluble without the encoder, and does
+# closing that change what a probe can read off the representation?
+#
+# Grid 1 said the JEPA arms tie their own untrained control. Four diagnostics on
+# those checkpoints say why that is not surprising:
+#
+#   1. a ridge map from the predictor's mask-token time features *alone* reaches
+#      R^2 0.58 on the layer-normed targets, against 0.79 for the trained
+#      predictor -- most of the task is a time-conditional prior;
+#   2. a linear probe recovering a token's own code from the JEPA encoder scores
+#      top-1 0.50, against 0.60 for the *untrained* encoder and 0.71 for the AR
+#      one -- the JEPA encoders are discarding code identity;
+#   3. without SIGReg the targets are 45% between-window variance and a
+#      context-mean baseline reaches cosine 0.73 to them -- full-sequence
+#      bidirectional targets admit a context-copy shortcut;
+#   4. last-token pooling beats cls_mean by 2.5-3.3 AUROC points on the causal
+#      arm, which is a fact about the probe rather than about pretraining.
+#
+# Each row here removes one of those, at grid 1's budget, seed, subset and
+# controls, so the comparison is against `jepa_ema` and nothing else moved.
+#
+# Budget: 48M nominal token slots = 2,930 steps at 64 x 256, five trained cells,
+# ~35-40 min each on the M4. The last two cells train nothing: they re-score
+# grid-1 checkpoints, which is how the pooling change is separated from the
+# objective changes rather than confounded with them.
+#
+# Pooling is `auto`, so the JEPA cells are read at `mean@final` and the reused
+# AR checkpoint at `last@final`. That means the trained rows here are NOT
+# directly comparable to grid 1's `cls_mean@final` rows -- which is exactly why
+# `jepa_ema_mean` exists: it is grid 1's reference cell under this grid's
+# pooling, and it is the row the five trained cells should be read against.
+
+name: 2026-09-03-pilot2-desynpuf
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 48000000
+seed: 0
+
+# Identical to grid 1 and to the phase-4 evaluation.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One untrained control per architecture *and per pooling*: the bidirectional
+# cells are read at `mean`, the causal one at `last`, and grid 1's controls were
+# computed at `cls_mean`, so neither of them transfers.
+control_runs: [jepa_notime, ar_last]
+
+runs:
+  # (1) The mask token stops carrying the clock. Diagnostic 1: if the predictor
+  # can no longer condition on the target's time, the time-conditional prior is
+  # unavailable and what is left has to come through the context.
+  - name: jepa_notime
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      predictor.mask_token_time: false
+
+  # (2) The target becomes content, computed from the span alone. Diagnostics 2
+  # and 3 together: the quantity being predicted is no longer mostly a clock and
+  # can no longer have absorbed the context. Time-feature dropout keeps the
+  # online encoder -- which feeds the EMA copy -- used to time-free inputs. The
+  # mask token keeps its time, so the predictor still knows *when* it is
+  # predicting; only the target changed.
+  - name: jepa_content
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      target.time_features: false
+      target.span_only: true
+      train.time_feature_dropout: 0.3
+
+  # (3) The same, plus the auxiliary code reconstruction. Diagnostic 2 head-on:
+  # a predicted latent that has to name the event's code cannot discard code
+  # identity, and the gradient reaches the encoder through the context.
+  - name: jepa_content_recon
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      target.time_features: false
+      target.span_only: true
+      train.time_feature_dropout: 0.3
+      objective.lambda_recon: 0.1
+
+  # (4) The reconstruction term on its own, against the unchanged default. This
+  # is what makes (3) readable: without it, any move in (3) could be the target
+  # change or the auxiliary loss, and there would be no way to say which.
+  - name: jepa_recon
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1
+
+  # (5) Content targets on pure future-span masking. Predicting the *next*
+  # stretch of a record from its history is the clinically interesting form of
+  # the task, and it is the one the context-copy shortcut helped least with, so
+  # it is where removing the shortcut should cost least.
+  - name: jepa_content_future
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      target.time_features: false
+      target.span_only: true
+      train.time_feature_dropout: 0.3
+      masking.p_future: 1.0
+
+  # (6) and (7): no training. Grid 1's `ar` and `jepa_ema` checkpoints re-scored
+  # under `auto` pooling -- `last@final` and `mean@final` respectively. These are
+  # the reference rows: without them, every trained cell above would be compared
+  # across a pooling change as well as an objective change.
+  - name: ar_last
+    reuse_checkpoint: runs/2026-09-03-pilot-desynpuf/ar/final.pt
+
+  - name: jepa_ema_mean
+    reuse_checkpoint: runs/2026-09-03-pilot-desynpuf/jepa_ema/final.pt
