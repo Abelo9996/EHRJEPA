@@ -17,6 +17,7 @@ at batch 32 is roughly 0.4 epochs of one demo-scale dataset.
 | masking | `p_future` 0.6; future spans U(8, 64) after a cut in [0.3L, 0.9L]; multi-block 2-4 blocks of 5-15% with 0-30% context drop |
 | optimizer | AdamW, lr 3e-4, cosine to 1% over 900 steps, 100-step warmup, wd 0.05, clip 1.0, batch 32, no accumulation |
 | hardware | Apple M4, 16 GB, MPS, float32 (`precision: auto`), torch 2.14 |
+| bf16 | `precision: bf16` does run end to end on MPS under torch 2.14 (checked, 10 steps, losses within noise of fp32); these runs are fp32 so the numbers are not mixed-precision numbers |
 | budget | `run.steps=900 run.max_seconds=1150`; A finished its 900 steps, B and C hit the wall-clock cap |
 | commit | `1d67896` |
 
