@@ -477,6 +477,34 @@ def test_report_renders_every_section() -> None:
     assert "Skipped" in text
 
 
+def test_restrict_eval_split_keeps_train_and_tuning_whole() -> None:
+    frame = pl.DataFrame(
+        {
+            "subject_id": list(range(200)),
+            "split": ["train"] * 100 + ["tuning"] * 30 + ["held_out"] * 70,
+        }
+    )
+    out = run.restrict_eval_split(frame, "held_out", limit=20, seed=0)
+    assert (out["split"] == "train").sum() == 100
+    assert (out["split"] == "tuning").sum() == 30
+    assert (out["split"] == "held_out").sum() == 20
+    # Deterministic in the subject, not the row order.
+    again = run.restrict_eval_split(
+        frame.sample(fraction=1.0, shuffle=True, seed=1), "held_out", 20, 0
+    )
+    assert set(out.filter(pl.col("split") == "held_out")["subject_id"].to_list()) == set(
+        again.filter(pl.col("split") == "held_out")["subject_id"].to_list()
+    )
+    # A different seed draws a different subset.
+    other = run.restrict_eval_split(frame, "held_out", 20, seed=1)
+    assert set(out.filter(pl.col("split") == "held_out")["subject_id"].to_list()) != set(
+        other.filter(pl.col("split") == "held_out")["subject_id"].to_list()
+    )
+    # A limit at or above the split size is a no-op.
+    assert run.restrict_eval_split(frame, "held_out", 70, seed=0).height == frame.height
+    assert run.restrict_eval_split(frame, "held_out", None, seed=0).height == frame.height
+
+
 def test_parse_models_rejects_random_init_without_an_architecture() -> None:
     with pytest.raises(ValueError, match="architecture"):
         run.parse_models(["lr", "random_init"])

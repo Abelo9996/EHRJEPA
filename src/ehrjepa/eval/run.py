@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import logging
 import subprocess
@@ -37,6 +38,43 @@ from ehrjepa.eval.metrics import bootstrap_ci, paired_bootstrap
 log = logging.getLogger(__name__)
 
 SPLITS = ("train", "tuning", "held_out")
+
+
+def restrict_eval_split(
+    anchors: pl.DataFrame, eval_split: str, limit: int | None, seed: int
+) -> pl.DataFrame:
+    """Keep every ``train``/``tuning`` row, and at most ``limit`` subjects of ``eval_split``.
+
+    The kept subjects are a seeded random draw, independent of task and of row
+    order: each eval-split subject gets ``blake2b("eval_subset:<seed>:<id>")`` and
+    the ``limit`` lowest hashes are kept, the same construction
+    :func:`ehrjepa.eval.tasks.select_anchors` uses for the anchor draw. A subject
+    kept for one task is therefore kept for every other task where it appears,
+    without the tasks needing to share an anchor set.
+    """
+    if limit is None:
+        return anchors
+    eval_rows = anchors.filter(pl.col("split") == eval_split)
+    if eval_rows.height <= limit:
+        return anchors
+    subjects = eval_rows["subject_id"].unique().sort().to_list()
+    draws = pl.DataFrame(
+        {
+            "subject_id": subjects,
+            "_draw": [
+                int.from_bytes(
+                    hashlib.blake2b(f"eval_subset:{seed}:{s}".encode(), digest_size=8).digest(),
+                    "big",
+                )
+                for s in subjects
+            ],
+        },
+        schema={"subject_id": anchors.schema["subject_id"], "_draw": pl.UInt64},
+    )
+    keep = draws.sort("_draw", "subject_id").head(limit).drop("_draw")
+    kept_eval = eval_rows.join(keep, on="subject_id", how="semi")
+    other = anchors.filter(pl.col("split") != eval_split)
+    return pl.concat([other, kept_eval]).sort("subject_id")
 
 
 @dataclass(frozen=True)
@@ -274,6 +312,8 @@ def run(
     device: str | None = None,
     few_shot: bool = True,
     limit: int | None = None,
+    eval_subject_limit: int | None = None,
+    eval_subject_seed: int = 0,
 ) -> dict:
     """Build any missing task frames, then evaluate every model on every task."""
     started = time.time()
@@ -292,6 +332,8 @@ def run(
         "task_dir": str(task_dir),
         "eval_split": eval_split,
         "anchor_seed": tasks.ANCHOR_SEED,
+        "eval_subject_limit": eval_subject_limit,
+        "eval_subject_seed": eval_subject_seed,
         "n_boot": n_boot,
         "seed": seed,
         "commit": _git_commit(),
@@ -322,6 +364,7 @@ def run(
             log.info("%s: dropped %d anchors absent from the cache", spec.name, dropped)
         if limit:
             anchors = anchors.head(limit)
+        anchors = restrict_eval_split(anchors, eval_split, eval_subject_limit, eval_subject_seed)
         results["tasks"][spec.name] = evaluate_task(
             spec.name,
             anchors,
@@ -361,6 +404,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--device", default=None)
     parser.add_argument("--no-few-shot", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="first N anchors, for smoke tests")
+    parser.add_argument(
+        "--eval-subject-limit",
+        type=int,
+        default=None,
+        help="restrict --eval-split to a seeded random subset of at most N subjects; "
+        "train/tuning are untouched",
+    )
+    parser.add_argument("--eval-subject-seed", type=int, default=0)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -381,6 +432,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         device=args.device,
         few_shot=not args.no_few_shot,
         limit=args.limit,
+        eval_subject_limit=args.eval_subject_limit,
+        eval_subject_seed=args.eval_subject_seed,
     )
     print(f"wrote {Path(args.out) / 'results.md'} in {results['runtime_seconds']}s")
     return 0
