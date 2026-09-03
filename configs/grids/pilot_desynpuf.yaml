@@ -1,0 +1,73 @@
+# Phase 5a pilot: does the JEPA objective learn anything a next-code objective
+# does not, at a matched token budget, and does either beat random init?
+#
+# Six runs, one budget, one seed. The first is the autoregressive control; the
+# next five vary one JEPA knob each against `jepa_ema`, which is the reference
+# cell -- EMA targets, SIGReg on, the shipped 60/40 future/block masking mix.
+#
+# 12M tokens is about 0.85 epochs of the desynpuf-s1 train split at max_len 256
+# (78,997 subjects after min_len=16, 11.3M train events). It is not enough to
+# converge anything. It is enough to say whether two objectives separate, which
+# is the only question this grid asks.
+
+name: 2026-09-03-pilot-desynpuf
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 12000000
+seed: 0
+
+# Identical to the phase-4 evaluation, so the numbers land in the same frame:
+# same 3,000-subject held-out cut, same seed, same 200 resamples.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: cls_mean
+probe_layer: final
+tasks: all
+
+# `lr` and `gbm` are count-feature models: nothing about them depends on the
+# encoder, so refitting them six times would burn an hour to reproduce numbers
+# that already exist. `random_init` does depend on the architecture and is
+# recomputed once against this grid's own 4x192 encoder.
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+
+runs:
+  - name: ar
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+
+  - name: jepa_ema
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+
+  - name: jepa_ema_nosig
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.0
+
+  - name: jepa_shared_sig
+    overrides:
+      objective.kind: jepa
+      model.target_mode: shared
+      objective.lambda_sigreg: 0.05
+
+  - name: jepa_ema_future
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      masking.p_future: 1.0
+
+  - name: jepa_ema_block
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      masking.p_future: 0.0

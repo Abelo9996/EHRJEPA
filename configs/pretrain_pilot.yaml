@@ -1,0 +1,79 @@
+# Pilot ablation run: 4-layer / 192-wide encoder, 2-layer / 96-wide predictor.
+#
+# Sized backwards from a wall-clock budget rather than from a parameter count:
+# the phase-5a pilot grid is six runs at one token budget on one 16 GB M4, and a
+# grid that takes a week is a grid that never finishes. At max_len 256 and batch
+# 64 this config trains at roughly 30k tok/s on MPS in float32, so a 12M-token
+# budget is about 45 minutes per run and the whole grid is one working day.
+#
+# Everything not about size is deliberately identical to configs/pretrain_small.yaml,
+# because the grid varies the objective and the masking, and a second difference
+# would make the comparison unreadable.
+
+data:
+  cache_dir: data/cache/desynpuf-s1
+  split: train
+  max_len: 256
+  min_len: 16
+  sampling: random_window
+  num_workers: 0
+
+model:
+  dim: 192
+  depth: 4
+  heads: 4                # head_dim 48
+  mlp: swiglu
+  mlp_ratio: 4.0
+  dropout: 0.1
+  attn_dropout: 0.0
+  n_freq: 16
+  pred_dim: 96            # head_dim 24
+  pred_depth: 2
+  pred_heads: 4
+  target_mode: ema
+  ema_start: 0.996
+  ema_end: 1.0
+  causal: false           # the `ar` runs override this
+  tie_embeddings: true
+
+objective:
+  kind: jepa              # "jepa" or "ar"
+  lambda_sigreg: 0.05
+  smooth_l1_beta: 1.0
+  sigreg_directions: 256
+  sigreg_max_rows: 8192
+  sigreg_grid: 17
+  sigreg_t_max: 5.0
+  sigreg_sigma: 1.0
+
+masking:
+  p_future: 0.6
+  future_min_span: 8
+  future_max_span: 64
+  future_cut_low: 0.3
+  future_cut_high: 0.9
+  block_min_blocks: 2
+  block_max_blocks: 4
+  block_block_low: 0.05
+  block_block_high: 0.15
+  block_context_drop: 0.3
+
+optim:
+  lr: 3.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  warmup_steps: 100
+  min_lr_ratio: 0.01
+  grad_clip: 1.0
+  accum_steps: 1
+
+run:
+  steps: 732              # 12M tokens at 64 x 256; scripts/ablate.py sets this
+  batch_size: 64
+  seed: 0
+  device: auto
+  precision: auto         # float32 on MPS
+  out_dir: runs/pilot
+  log_every: 25
+  ckpt_every: 0
+  tensorboard: true

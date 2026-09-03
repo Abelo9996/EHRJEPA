@@ -1,0 +1,39 @@
+# Pipeline test for scripts/ablate.py, not an experiment.
+#
+# Two runs of 200 steps each -- one per objective -- through the full path the
+# pilot will take: train to a token budget, evaluate the checkpoint on the same
+# 3,000-subject held-out cut, append a row. 200 steps is roughly 3.3M nominal
+# tokens, about a quarter of the pilot's budget, and nothing about the numbers it
+# produces is interpretable. What it establishes is that the AR arm trains, that
+# an AR checkpoint survives the probe path, that the baseline reuse and the
+# resume-skip work, and how long a pilot cell will take.
+
+name: 2026-09-03-microgrid
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 3276800          # 200 x 64 x 256
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: cls_mean
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+
+runs:
+  - name: micro_ar
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+
+  - name: micro_jepa_ema
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
