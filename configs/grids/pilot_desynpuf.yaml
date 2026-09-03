@@ -13,9 +13,10 @@
 # *less* compute than the 900-step sanity runs that already tied with a
 # random-init probe. A grid at that budget could only reproduce that tie, and
 # half of what phase 5a asks is whether anything changes with longer training.
-# 48M is 3.3x the sanity runs and, at the ~50% padding this cache shows at
-# max_len 256, about 24M real events -- roughly 2.1 epochs of the 11.3M-event
-# train split. Still nowhere near converged; enough to move.
+# 48M is 3.3x the sanity runs and, at the 47% fill this cache shows at max_len
+# 256 (mean window 121 events of 256, measured over 2,000 draws), about 22.7M
+# real events -- roughly 2.0 epochs of the 11.3M-event train split. Still nowhere
+# near converged; enough to move.
 
 name: 2026-09-03-pilot-desynpuf
 base: configs/pretrain_pilot.yaml

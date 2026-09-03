@@ -26,13 +26,16 @@ archived under [`legacy/`](legacy/README.md); it has known label leakage and
 none of its numbers are valid.
 
 What exists now: the MEDS ETL and tensor cache (`data/`), the three networks
-(`models/`), the SIGReg + latent-prediction objective (`objectives/`), a
-resumable pretraining loop (`train/`), and a downstream evaluation harness
-(`eval/`) with ACES-defined tasks, count-feature baselines, frozen-encoder
-probes and bootstrap intervals. The runs recorded under `docs/experiments/` are
-short MPS sanity runs and one evaluation of the checkpoints they produced;
-those checkpoints are ~900 steps on one demo-scale dataset, so the evaluation
-measures the harness on real cohorts, not a trained model.
+(`models/`), the SIGReg + latent-prediction objective and a next-code
+autoregressive baseline that shares its embedding and encoder (`objectives/`), a
+resumable pretraining loop (`train/`), a downstream evaluation harness (`eval/`)
+with ACES-defined tasks, count-feature baselines, frozen-encoder probes and
+bootstrap intervals, and an ablation runner that trains a grid of objectives to a
+matched token budget and evaluates each (`scripts/ablate.py`). The runs recorded
+under `docs/experiments/` are short MPS sanity runs, one evaluation of the
+checkpoints they produced, and a pilot ablation grid; none of the checkpoints
+involved is trained long enough for its numbers to be a statement about the
+architecture.
 
 ## Data access
 
@@ -81,13 +84,15 @@ uv run python -m ehrjepa.train.pretrain --config configs/pretrain_small.yaml \
 ```
 src/ehrjepa/
   data/        MEDS ETL, vocabulary, tokenization, datasets and collators
-  models/      event encoder, latent predictor, EMA target encoder
-  objectives/  latent prediction loss, SIGReg anti-collapse regularizer
+  models/      event encoder (bidirectional or causal), latent predictor,
+               EMA target encoder, next-code AR model
+  objectives/  latent prediction loss, SIGReg anti-collapse regularizer,
+               next-code cross-entropy
   train/       YAML config, training loop, checkpointing
   eval/        MEDS-DEV/ACES + EHRSHOT tasks, frozen-encoder probes, baselines
   utils/       seeding, device selection, logging, run directories
-scripts/       CLI entry points (placeholder)
-configs/       YAML run configs: pretrain_small.yaml, pretrain_debug.yaml
+scripts/       ablate.py (ablation grids), throughput.py (tok/s measurement)
+configs/       YAML run configs and ablation grids (configs/grids/)
 docs/          experiment logs
 tests/         test suite
 legacy/        archived pre-rebuild visit-vector pipeline — do not build on it

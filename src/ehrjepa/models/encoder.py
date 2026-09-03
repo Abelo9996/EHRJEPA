@@ -114,8 +114,10 @@ class Encoder(nn.Module):
         # (B, 1, 1, L+1): key-side padding, broadcast over heads and queries.
         attn_mask = keep[:, None, None, :]
         if self.causal:
-            # (L+1, L+1) lower triangle, intersected with the key padding. Every
-            # row keeps its own diagonal entry, so no row is fully masked.
+            # (L+1, L+1) lower triangle, intersected with the key padding. Column
+            # 0 is CLS, which is a valid key and is at or before every query, so
+            # no row goes fully masked -- including a padding row, whose own
+            # diagonal entry the key mask removes.
             tri = torch.ones(n + 1, n + 1, dtype=torch.bool, device=tokens.device).tril()
             attn_mask = attn_mask & tri[None, None]
         cos, sin = self.rope(n + 1, tokens.device, x.dtype)

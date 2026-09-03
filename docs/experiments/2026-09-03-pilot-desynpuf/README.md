@@ -51,7 +51,7 @@ numbers existed.
 | parameters | 7,959,680 trainable for a JEPA cell — embedding 5,892,288 (74%, of which 5.76M is the 30,000 × 192 code table), encoder 1,781,056, predictor 286,336. AR: 7,703,728 — same embedding and encoder, head 30,384 (a LayerNorm and the output bias; the projection matrix *is* the code table). An `ema` cell holds a second frozen copy of embedding+encoder, 15,633,024 parameters in total but the same 7,959,680 trainable. |
 | optimizer | AdamW, lr 3e-4, cosine to 1% over the run, 100-step warmup, wd 0.05, clip 1.0, no accumulation |
 | **budget** | **48,005,120 nominal token slots per run = 2,930 steps × 64 × 256, identical for every cell** |
-| in real events | this cache is roughly 50% padded at `max_len` 256, so ≈24M real events ≈ 2.1 epochs of the 11.3M-event train split |
+| in real events | mean window is 121 events of 256 on this cache (47% fill, measured over 2,000 draws), so ≈22.7M real events ≈ 2.0 epochs of the 11.3M-event train split |
 | seed | 0, every cell |
 | precision | float32 (`precision: auto` on MPS) |
 | hardware | Apple M4, 16 GB, MPS, torch 2.14 |
@@ -62,7 +62,8 @@ numbers existed.
 that already tied with a random-init probe — a grid at that budget could only
 reproduce the tie, and half the point of this phase is what happens with more
 training. 48M is the largest round budget that keeps the slowest cell inside a
-45-minute wall-clock ceiling. Measured on this machine (`scripts/throughput.py`,
+45-minute wall-clock ceiling — 3.3x the sanity runs, about 2.0 epochs of real
+events. Measured on this machine (`scripts/throughput.py`,
 `runs/throughput/throughput.json`, 50 steps per cell, first logging window
 dropped):
 
@@ -98,9 +99,14 @@ table:
 `lr` and `gbm` are count-feature models with no dependence on the encoder, so
 their held-out scores are reused from the phase-4 `predictions.parquet` rather
 than refit six times. `random_init` *is* architecture-dependent and is computed
-once against this grid's own 4×192 encoder — the control for this model has to be
-an untrained copy of this model, not of the phase-4 6×256 one. Both land in
-`baselines.json` and in the "Reference models" table of `summary.md`.
+twice — once against the `ar` cell and once against `jepa_ema`, appearing as
+`random_init@ar` and `random_init@jepa_ema`. The control for this model has to be
+an untrained copy of *this* model, not of the phase-4 6×256 one, and an untrained
+causal encoder is not an untrained bidirectional one: its CLS row is a constant,
+so half of its `cls_mean` vector is a constant column. One grid-wide control
+would quietly compare the AR cell against a different probe than it got. All of
+them land in `baselines.json` and in the "Reference models" table of
+`summary.md`.
 
 ### One caveat on the AR cell's features
 
@@ -134,7 +140,7 @@ DE-SynPUF is a synthetic public-use file built by sampling and swapping fields
 across real beneficiaries specifically to break re-identifiable associations, so
 predictive structure between a patient's history and their future is weakened by
 construction. Low AUROCs are a property of the source. Nothing in this directory
-is comparable to published numbers on MIMIC or EHRSHOT, and 2.1 epochs of a
+is comparable to published numbers on MIMIC or EHRSHOT, and 2.0 epochs of a
 7.9M-parameter model is not a statement about what any of these objectives can
 do. What the grid can support is a *relative* claim at matched compute, with a
 random-init control and a count-feature ceiling on the same rows.
