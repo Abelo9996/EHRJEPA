@@ -23,9 +23,14 @@ relying on architectural asymmetry or negatives.
 There are no pretrained weights, no benchmark numbers, and no claims of
 performance in this repository. The previous visit-vector prototype has been
 archived under [`legacy/`](legacy/README.md); it has known label leakage and
-none of its numbers are valid. The current tree is a package skeleton: module
-docstrings describe what each subpackage will contain, and no model code has
-been written yet.
+none of its numbers are valid.
+
+What exists now: the MEDS ETL and tensor cache (`data/`), the three networks
+(`models/`), the SIGReg + latent-prediction objective (`objectives/`), and a
+resumable pretraining loop (`train/`). The only runs performed so far are the
+short MPS sanity runs recorded under `docs/experiments/`, which exist to show
+the diagnostics move in the expected directions -- they are not results.
+`eval/` is still a docstring.
 
 ## Data access
 
@@ -62,7 +67,12 @@ Verify the install:
 uv run python -c "import ehrjepa; print(ehrjepa.__version__)"
 ```
 
-There is no training entry point yet.
+Pretrain (needs a tensor cache built by `python -m ehrjepa.data.tokenize build`):
+
+```bash
+uv run python -m ehrjepa.train.pretrain --config configs/pretrain_small.yaml \
+  --override run.steps=2000 optim.lr=3e-4
+```
 
 ## Layout
 
@@ -75,7 +85,8 @@ src/ehrjepa/
   eval/        MEDS-DEV/ACES + EHRSHOT tasks, frozen-encoder probes, baselines
   utils/       seeding, device selection, logging, run directories
 scripts/       CLI entry points (placeholder)
-configs/       YAML run configs (placeholder)
+configs/       YAML run configs: pretrain_small.yaml, pretrain_debug.yaml
+docs/          experiment logs
 tests/         test suite
 legacy/        archived pre-rebuild visit-vector pipeline — do not build on it
 ```

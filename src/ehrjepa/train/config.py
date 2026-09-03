@@ -104,7 +104,7 @@ class PretrainConfig:
 
     def model_config(self, vocab_size: int) -> EHRJEPAConfig:
         """Resolve the model section, defaulting ``vocab_size`` to the cache's."""
-        values = dict(self.model)
+        values = coerce_section(EHRJEPAConfig, self.model, "model")
         values.setdefault("vocab_size", vocab_size)
         return EHRJEPAConfig.from_mapping(values)
 
@@ -128,13 +128,43 @@ _SECTIONS: dict[str, type] = {
 }
 
 
+_SCALARS: tuple[type, ...] = (bool, int, float, str)
+
+
+def coerce_section(cls: type, values: Mapping[str, Any], where: str) -> dict[str, Any]:
+    """Check keys against ``cls``'s fields and coerce scalars to their annotated type.
+
+    Worth the trouble because the common way to get this wrong is a shell quoting
+    slip -- ``--override "run.steps=900 run.log_every=25"`` as one argument makes
+    ``steps`` the *string* ``"900 run.log_every=25"``, which a plain dataclass
+    accepts happily and which then fails a thousand lines later inside the loop.
+    Here it fails at load time, naming the key.
+    """
+    annotations = {f.name: f.type for f in fields(cls)}
+    unknown = set(values) - set(annotations)
+    if unknown:
+        raise ValueError(f"unknown keys in config section {where!r}: {sorted(unknown)}")
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        expected = annotations[key]
+        target = {"int": int, "float": float, "bool": bool, "str": str}.get(
+            expected if isinstance(expected, str) else getattr(expected, "__name__", "")
+        )
+        if target is None or isinstance(value, target) or value is None:
+            out[key] = value
+            continue
+        if not isinstance(value, _SCALARS):
+            raise ValueError(f"{where}.{key} expects {target.__name__}, got {type(value).__name__}")
+        try:
+            out[key] = target(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{where}.{key} expects {target.__name__}, got {value!r}") from exc
+    return out
+
+
 def _build_section(name: str, values: Mapping[str, Any]) -> Any:
     cls = _SECTIONS[name]
-    known = {f.name for f in fields(cls)}
-    unknown = set(values) - known
-    if unknown:
-        raise ValueError(f"unknown keys in config section {name!r}: {sorted(unknown)}")
-    return cls(**values)
+    return cls(**coerce_section(cls, values, name))
 
 
 def from_mapping(raw: Mapping[str, Any]) -> PretrainConfig:

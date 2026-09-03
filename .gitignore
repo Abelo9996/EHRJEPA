@@ -40,6 +40,10 @@ ENV/
 # hand-written, contain no real patient data, and must be tracked.
 !tests/fixtures/**
 
+# ...and except the metric logs of the recorded experiments, which are derived
+# aggregates over a public synthetic dataset and are the point of docs/.
+!docs/experiments/**
+
 # Runs, checkpoints, logs
 checkpoints/
 runs/
