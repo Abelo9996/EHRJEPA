@@ -203,6 +203,39 @@ def _SPLITS_ITEMS():
     return [(s,) for subjects in _SPLITS.values() for s in subjects]
 
 
+@pytest.mark.parametrize(
+    ("task_name", "code", "days"),
+    [
+        ("mortality_365d", DEATH, 365),
+        ("inpatient_365d", ADMIT, 365),
+        ("readmission_30d", ADMIT, 30),
+    ],
+)
+def test_aces_labels_agree_with_a_direct_polars_computation(
+    cohort: tuple[Path, Path], task_name: str, code: str, days: int
+) -> None:
+    """ACES owns the windowing; this is the second opinion on what it returned."""
+    meds_dir, _ = cohort
+    spec = next(t for t in tasks.TASKS if t.name == task_name)
+    labels, _ = tasks.build_task(spec, meds_dir)
+    events = tasks.read_events(meds_dir)
+    hits = events.filter(pl.col("code") == code).select("subject_id", "event_time")
+    native = (
+        labels.join(hits, on="subject_id", how="left")
+        .with_columns(
+            hit=(
+                (pl.col("event_time") > pl.col("anchor_time"))
+                & (pl.col("event_time") <= pl.col("anchor_time") + pl.duration(days=days))
+            ).fill_null(False)  # noqa: FBT003
+        )
+        .group_by("subject_id", "anchor_time")
+        .agg(native=pl.col("hit").any().cast(pl.Int8))
+    )
+    merged = labels.join(native, on=["subject_id", "anchor_time"], how="left")
+    assert merged.height == labels.height
+    assert (merged["label"] != merged["native"]).sum() == 0
+
+
 # --------------------------------------------------------------------------- #
 # Leakage
 # --------------------------------------------------------------------------- #
