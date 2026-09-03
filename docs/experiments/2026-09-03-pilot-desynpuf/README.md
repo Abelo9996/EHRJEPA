@@ -82,6 +82,17 @@ float32 is used throughout: bf16 helps the JEPA cell and hurts the other three,
 and a precision that varies by cell would be a second difference in a comparison
 that only tolerates one.
 
+Those numbers were measured on an otherwise idle machine. This is a laptop, not
+a cluster node: at the moment the grid was launched it was also running a Lean
+build and two other sessions (load average 6.4), and the `ar` cell's first
+windows came in at 5.5k tok/s rather than 10.0k — 1.49 s/step against the 0.81
+s/step the sizing assumed. Wall-clock per cell therefore moves with whatever else
+the machine is doing, between roughly 33–40 min idle and 60–75 min contended;
+tok/s is logged per cell in `summary.md` so each row says which it got. Nothing
+about the *comparison* depends on this — every cell spends the same tokens, and
+the runner is resumable — but a wall-clock estimate for the whole grid is a range
+(≈4 h to ≈6.5 h), not a number.
+
 ## Evaluation
 
 Identical to [`../2026-09-03-eval-desynpuf/`](../2026-09-03-eval-desynpuf/README.md),
