@@ -35,6 +35,10 @@ jobs:
           # that CI has no use for.
           uv pip install --index-url https://download.pytorch.org/whl/cpu torch
           uv pip install -e ".[dev]"
+          # es-aces evaluates the task YAMLs; it is part of the "eval" extra,
+          # installed separately because that extra also pulls xgboost, which
+          # requires Python >= 3.12 and would break the 3.10 job.
+          uv pip install es-aces
 
       - name: Ruff (lint)
         run: uv run ruff check .

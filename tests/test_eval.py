@@ -10,6 +10,7 @@ are bit-for-bit unchanged. That is the failure the archived pipeline in
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 import json
 from pathlib import Path
 
@@ -29,6 +30,14 @@ DEBUG_CONFIG = REPO / "configs" / "pretrain_debug.yaml"
 requires_demo = pytest.mark.skipif(
     not (DEMO_CACHE / "meta.json").exists() or not (DEMO_MEDS / "metadata").is_dir(),
     reason="mimic-demo cache/MEDS extract is not built",
+)
+
+#: ACES evaluates the label windows; it is an optional extra, and only the tests
+#: that ask for a *label* need it. The anchor rule and both leakage tests are
+#: deliberately reachable without it.
+requires_aces = pytest.mark.skipif(
+    importlib.util.find_spec("aces") is None,
+    reason="ACES is not installed (pip install 'ehrjepa[eval]')",
 )
 
 BIRTH = "MEDS_BIRTH"
@@ -163,6 +172,7 @@ def test_anchor_draw_is_a_pure_function_of_seed_and_subject(cohort: tuple[Path, 
     assert not first.sort("subject_id").equals(other.sort("subject_id"))
 
 
+@requires_aces
 def test_readmission_anchors_are_inpatient_discharges(cohort: tuple[Path, Path]) -> None:
     meds_dir, _ = cohort
     spec = next(t for t in tasks.TASKS if t.name == "readmission_30d")
@@ -172,14 +182,13 @@ def test_readmission_anchors_are_inpatient_discharges(cohort: tuple[Path, Path])
 
     events = tasks.read_events(meds_dir)
     discharges = set(
-        events.filter(pl.col("code") == DISCHARGE)
-        .select("subject_id", "event_time")
-        .iter_rows()
+        events.filter(pl.col("code") == DISCHARGE).select("subject_id", "event_time").iter_rows()
     )
     for row in labels.iter_rows(named=True):
         assert (row["subject_id"], row["anchor_time"]) in discharges
 
 
+@requires_aces
 def test_new_dx_excludes_subjects_with_a_prior_diagnosis(cohort: tuple[Path, Path]) -> None:
     meds_dir, _ = cohort
     spec = next(t for t in tasks.TASKS if t.name == "new_dx_365d/diabetes")
@@ -187,7 +196,7 @@ def test_new_dx_excludes_subjects_with_a_prior_diagnosis(cohort: tuple[Path, Pat
     events = tasks.read_events(meds_dir)
     dx = events.filter(pl.col("code") == DIABETES)
 
-    prevalent = set(s for s, in _SPLITS_ITEMS() if s % 5 == 0)
+    prevalent = set(s for (s,) in _SPLITS_ITEMS() if s % 5 == 0)
     assert prevalent, "the fixture must contain prevalent cases to exclude"
     assert prevalent.isdisjoint(set(labels["subject_id"].to_list()))
 
@@ -211,6 +220,7 @@ def _SPLITS_ITEMS():
         ("readmission_30d", ADMIT, 30),
     ],
 )
+@requires_aces
 def test_aces_labels_agree_with_a_direct_polars_computation(
     cohort: tuple[Path, Path], task_name: str, code: str, days: int
 ) -> None:
@@ -250,32 +260,38 @@ def leakage_pair(tmp_path_factory: pytest.TempPathFactory, cohort: tuple[Path, P
     embedding sees may change.
     """
     meds_dir, cache_dir = cohort
-    spec = next(t for t in tasks.TASKS if t.name == "mortality_365d")
-    labels, _ = tasks.build_task(spec, meds_dir)
-    held_out = labels.filter(pl.col("split") == "held_out")
-    assert held_out.height > 0
+    events = tasks.read_events(meds_dir)
+    anchors, _ = tasks.select_anchors(events, 365, death_mask=pl.col("code") == DEATH)
+    held_out = anchors.join(
+        pl.read_parquet(meds_dir / "metadata" / "subject_splits.parquet"),
+        on="subject_id",
+        how="inner",
+    ).filter(pl.col("split") == "held_out")
+    # Only subjects the fixture gave no death: their mortality_365d label is 0.
+    held_out = held_out.filter(pl.col("subject_id") % 7 != 0)
+    assert held_out.height > 0, "need held_out subjects without a death to add one to"
 
     extra = [
         (row["subject_id"], row["anchor_time"] + dt.timedelta(days=1), DEATH, None)
         for row in held_out.iter_rows(named=True)
-        if row["subject_id"] % 7 != 0
     ]
-    assert extra, "need held_out subjects without a death to add one to"
 
     root = tmp_path_factory.mktemp("meds-leak")
     cache = tmp_path_factory.mktemp("cache-leak")
     _write_meds(root, _SPLITS, extra=extra)
     build_cache(root, cache, min_count=2, min_value_obs=5)
-    touched = held_out.filter(
-        pl.col("subject_id").is_in([s for s, _, _, _ in extra])
-    )
-    return cache_dir, cache, touched
+    return cache_dir, cache, held_out
 
 
-def test_post_anchor_event_flips_the_label(leakage_pair) -> None:
+def test_post_anchor_event_flips_the_label(leakage_pair, cohort) -> None:
     """The fixture is only meaningful if the added event really changes the label."""
-    _, _, touched = leakage_pair
-    assert (touched["label"] == 0).all()
+    meds_dir, _ = cohort
+    _, _, anchors = leakage_pair
+    deaths = tasks.read_events(meds_dir).filter(pl.col("code") == DEATH)["subject_id"]
+    assert set(anchors["subject_id"].to_list()).isdisjoint(set(deaths.to_list()))
+    # In the perturbed extract every one of them dies one day after the anchor,
+    # which is inside the 365-day window: label 0 becomes label 1.
+    assert anchors.height > 0
 
 
 def test_count_features_ignore_events_at_or_after_the_anchor(leakage_pair) -> None:
@@ -474,6 +490,7 @@ def test_parse_models_rejects_random_init_without_an_architecture() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@requires_aces
 @requires_demo
 def test_end_to_end_on_the_demo_cache(tmp_path: Path) -> None:
     """Debug checkpoint, two tasks, three models, on CPU -- seconds, not minutes."""

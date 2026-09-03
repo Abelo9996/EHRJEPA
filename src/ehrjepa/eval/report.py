@@ -160,9 +160,7 @@ def render(results: Mapping) -> str:
     if skipped:
         lines.append("## Skipped")
         lines.append("")
-        lines += _table(
-            ["task", "reason"], [[f"`{k}`", str(v)] for k, v in skipped.items()]
-        ) + [""]
+        lines += _table(["task", "reason"], [[f"`{k}`", str(v)] for k, v in skipped.items()]) + [""]
     return "\n".join(lines)
 
 

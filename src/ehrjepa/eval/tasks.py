@@ -466,9 +466,7 @@ def build_all(
     events = read_events(meds_dir)
     summary: dict = {"source": meds_dir.name, "skipped": skipped, "tasks": {}}
     for spec in supported:
-        labels, counts = build_task(
-            spec, meds_dir, events=events, config_dir=config_dir, seed=seed
-        )
+        labels, counts = build_task(spec, meds_dir, events=events, config_dir=config_dir, seed=seed)
         path = out_dir / f"{spec.name.replace('/', '__')}.parquet"
         labels.write_parquet(path)
         counts["path"] = str(path)
@@ -503,9 +501,7 @@ def _cli(argv: Iterable[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     names = None if args.tasks == "all" else args.tasks.split(",")
     out = Path(args.out) if args.out else Path("data/tasks") / args.source
-    summary = build_all(
-        Path(args.meds_root) / args.source, out, names=names, seed=args.seed
-    )
+    summary = build_all(Path(args.meds_root) / args.source, out, names=names, seed=args.seed)
     print(json.dumps(summary, indent=2, default=str))
     return 0
 

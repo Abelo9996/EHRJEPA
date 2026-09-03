@@ -66,12 +66,15 @@ features and the encoder embeddings come out bit-identical.
 ## Cohort sizes and prevalence
 
 Anchoring keeps 72,835 of 116,352 subjects for the 365-day tasks: 88,196 have
-≥32 events before some candidate time, 88,196 of those have a candidate before
-death, and 72,835 of those have a full year of record after the drawn anchor or
-die inside it. `readmission_30d` draws from inpatient discharges only and keeps
-30,592 of the 37,780 subjects that have one. The `new_dx_365d` tasks drop
-subjects with a prevalent diagnosis at or before the anchor, which is where
-their smaller counts come from.
+≥32 events before some candidate time, 88,124 of those have a candidate time
+strictly before death, and 72,835 of those have a full year of record after the
+drawn anchor or die inside it — so the follow-up requirement is what removes
+most of the cohort (15,289 subjects), not the history requirement (28,156) plus
+death (72). `readmission_30d` draws from inpatient discharges only: 37,780
+subjects have one, 33,302 with enough history, 30,592 with 30 days of follow-up.
+The `new_dx_365d` tasks then drop subjects with a prevalent diagnosis at or
+before the anchor, which is where their smaller counts come from — 23,542
+prevalent diabetes cases, 11,811 heart failure, 8,836 CKD, 12,836 COPD.
 
 | task | anchored | labelled | held_out n | held_out rate |
 |---|---|---|---|---|

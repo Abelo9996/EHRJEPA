@@ -37,7 +37,10 @@ dependencies = [
 
 [project.optional-dependencies]
 # Downstream evaluation (ehrjepa.eval): ACES evaluates the task YAMLs in
-# configs/tasks/, xgboost is the gradient-boosting baseline.
+# configs/tasks/, xgboost is the gradient-boosting baseline. xgboost's own
+# floor is Python 3.12, so this extra is not installable on 3.10/3.11; the
+# label side needs only es-aces, and `ehrjepa.eval.baselines.fit_gbm` is the
+# single place that imports xgboost (in a subprocess, see ehrjepa.eval).
 eval = [
   "es-aces>=0.7,<0.8",
   "xgboost>=2.0",

@@ -65,9 +65,7 @@ def parse_models(specs: Sequence[str]) -> list[ModelSpec]:
         elif spec == "random_init":
             if not checkpoints:
                 raise ValueError("random_init needs a ckpt: model to copy its architecture from")
-            out.append(
-                ModelSpec("random_init", "probe", Path(checkpoints[0]), random_init=True)
-            )
+            out.append(ModelSpec("random_init", "probe", Path(checkpoints[0]), random_init=True))
         elif spec.startswith("ckpt:"):
             path = Path(spec.split(":", 1)[1])
             out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path))
@@ -76,9 +74,7 @@ def parse_models(specs: Sequence[str]) -> list[ModelSpec]:
     return out
 
 
-def _split_arrays(
-    anchors: pl.DataFrame, eval_split: str
-) -> dict[str, np.ndarray]:
+def _split_arrays(anchors: pl.DataFrame, eval_split: str) -> dict[str, np.ndarray]:
     """Row indices of each split within the task frame."""
     split = anchors["split"].to_numpy()
     return {name: np.flatnonzero(split == name) for name in ("train", "tuning", eval_split)}
