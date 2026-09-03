@@ -380,35 +380,37 @@ def test_five_step_ar_run_on_the_debug_config_is_fast_and_logs(tmp_path: Path) -
     assert max_len == 64
 
 
-def test_probe_scaler_neutralises_a_constant_column_instead_of_amplifying_it() -> None:
-    """A causal encoder's CLS block is constant up to float32 noise.
+def test_a_causal_checkpoints_cls_block_is_dropped_by_the_probe_scaler() -> None:
+    """The dead CLS column must arrive at the probe as zeros, not as amplified noise.
 
-    sklearn only neutralises *exactly* zero variance, so without the guard that
-    block arrives at the probe as unit-variance numerical noise competing for the
-    same L2 budget as the real features.
+    A causal encoder's CLS row is the same vector for every subject, so that half
+    of a ``cls_mean`` embedding has exactly zero variance and ``StandardScaler``
+    neutralises it -- the check that matters, because a column that were constant
+    only to within float noise would instead be divided by its ~1e-7 std and reach
+    the probe as unit-variance garbage competing for the same L2 budget as the
+    real features. Verified on a real checkpoint's cached embeddings (98,949 rows,
+    all 192 CLS scales exactly 1.0, all transformed values exactly 0); reproduced
+    here on a two-batch forward so it stays true if the pooling changes.
     """
+    torch.manual_seed(0)
     from sklearn.preprocessing import StandardScaler
 
-    from ehrjepa.eval.baselines import _neutralise_constant_columns, fit_logistic
-
-    rng = np.random.default_rng(0)
-    signal = rng.normal(size=(400, 4))
-    constant = np.float32(0.8399) + rng.normal(scale=1e-7, size=(400, 2)).astype(np.float32)
-    x = np.hstack([signal, constant]).astype(np.float32)
-
-    raw = StandardScaler().fit(x)
-    assert (raw.scale_[4:] < 1e-5).all(), "the fixture must actually be near-constant"
-
-    guarded = StandardScaler().fit(x)
-    assert _neutralise_constant_columns(guarded) == 2
-    assert (guarded.scale_[4:] == 1.0).all()
-    assert np.allclose(guarded.scale_[:4], raw.scale_[:4]), "real columns untouched"
-
-    # The noise columns come out at their own tiny scale rather than at unit scale.
-    assert np.abs(guarded.transform(x)[:, 4:]).max() < 1e-5
-    assert np.abs(raw.transform(x)[:, 4:]).max() > 1.0
-
-    # And the fit itself still works, on features that include the dead block.
-    y = (signal[:, 0] + rng.normal(scale=0.5, size=400) > 0).astype(int)
-    model = fit_logistic(x[:200], y[:200], x[200:], y[200:], seed=0)
-    assert np.isfinite(model.predict_proba(x[200:])).all()
+    model = EHRAR(_config()).eval()
+    rows = []
+    with torch.no_grad():
+        for seed in range(6):
+            batch = _batch(batch=4, seed=seed)
+            encoded = model.encoder(model.embed_batch(batch), batch["attention_mask"])
+            rows.append(
+                torch.cat(
+                    probe._pool(encoded.tokens, encoded.cls, batch["attention_mask"], "cls_mean"),
+                    dim=-1,
+                )
+            )
+    x = torch.cat(rows).numpy().astype(np.float32)
+    dim = model.config.dim
+    assert len(np.unique(x[:, :dim], axis=0)) == 1, "CLS must be identical for every subject"
+    scaler = StandardScaler().fit(x)
+    assert (scaler.scale_[:dim] == 1.0).all()
+    assert np.abs(scaler.transform(x)[:, :dim]).max() == 0.0
+    assert (scaler.scale_[dim:] > 1e-4).all(), "the pooled half must still carry variance"

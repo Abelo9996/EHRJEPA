@@ -177,37 +177,6 @@ class FittedModel:
         return np.asarray(self.model.predict_proba(x))[:, 1]
 
 
-#: A column whose training std is below this fraction of the median column std is
-#: treated as constant by :func:`_neutralise_constant_columns`.
-CONSTANT_COLUMN_RTOL = 1e-6
-
-
-def _neutralise_constant_columns(scaler: StandardScaler) -> int:
-    """Stop ``StandardScaler`` from amplifying columns that are constant up to noise.
-
-    A causal encoder's CLS row is a function of the CLS parameter alone -- position
-    0 attends only to itself -- so the CLS half of a ``cls_mean`` probe vector is
-    the same number for every subject. In exact arithmetic that column has zero
-    variance and sklearn neutralises it; in float32 it lands around 1e-7, which is
-    above sklearn's absolute ``10 * eps`` threshold, so the column gets divided by
-    1e-7 and reaches the probe as *unit-variance numerical noise*. 192 such columns
-    then spend the same L2 budget as the 192 real ones, which is the failure mode
-    the ``lr`` scaling bug had in a different disguise, and it would show up as
-    "the autoregressive arm probes badly" rather than as a scaling defect.
-
-    Returns the number of columns neutralised, so a caller can log it.
-    """
-    scales = np.asarray(scaler.scale_, dtype=np.float64)
-    reference = float(np.median(scales[scales > 0])) if np.any(scales > 0) else 0.0
-    if reference <= 0:
-        return 0
-    tiny = scales < CONSTANT_COLUMN_RTOL * reference
-    if tiny.any():
-        scaler.scale_[tiny] = 1.0
-        log.info("probe: neutralised %d near-constant column(s)", int(tiny.sum()))
-    return int(tiny.sum())
-
-
 def fit_logistic(
     x_train,
     y_train: np.ndarray,
@@ -246,8 +215,6 @@ def fit_logistic(
     if scale:
         scaler = TfidfTransformer() if sparse.issparse(x_train) else StandardScaler(with_mean=True)
         scaler.fit(x_train)
-        if isinstance(scaler, StandardScaler):
-            _neutralise_constant_columns(scaler)
         x_train, x_tune = scaler.transform(x_train), scaler.transform(x_tune)
     # Same L2 objective either way, but liblinear's coordinate descent is ~20x
     # slower than lbfgs on the dense 512-column embedding probes (6.4s vs 0.3s
