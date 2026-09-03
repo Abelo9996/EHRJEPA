@@ -22,14 +22,14 @@ Metrics are on the `held_out` split. Intervals are percentile bootstrap over sub
 
 ## Cohorts
 
-| task | train n (rate) | tuning n (rate) | held_out n (rate) |
-|---|---|---|---|
-| `mortality_365d` | 2718 (0.0743) | 326 (0.0798) | 337 (0.0801) |
-| `inpatient_365d` | 2718 (0.1144) | 326 (0.1288) | 337 (0.1068) |
-| `new_dx_365d/diabetes` | 2414 (0.0004) | 292 (0.0000) | 311 (0.0000) |
-| `new_dx_365d/heart_failure` | 2581 (0.0058) | 311 (0.0096) | 314 (0.0000) |
-| `new_dx_365d/ckd` | 2540 (0.0004) | 308 (0.0000) | 325 (0.0000) |
-| `new_dx_365d/copd` | 2601 (0.0012) | 312 (0.0032) | 324 (0.0031) |
+| task | train n (rate) | tuning n (rate) | held_out n (rate) | note |
+|---|---|---|---|---|
+| `mortality_365d` | 2718 (0.0743) | 326 (0.0798) | 337 (0.0801) |  |
+| `inpatient_365d` | 2718 (0.1144) | 326 (0.1288) | 337 (0.1068) |  |
+| `new_dx_365d/diabetes` | 2414 (0.0004) | 292 (0.0000) | 311 (0.0000) | single-class train or evaluation split; models not fit |
+| `new_dx_365d/heart_failure` | 2581 (0.0058) | 311 (0.0096) | 314 (0.0000) | single-class train or evaluation split; models not fit |
+| `new_dx_365d/ckd` | 2540 (0.0004) | 308 (0.0000) | 325 (0.0000) | single-class train or evaluation split; models not fit |
+| `new_dx_365d/copd` | 2601 (0.0012) | 312 (0.0032) | 324 (0.0031) |  |
 
 ## AUROC
 

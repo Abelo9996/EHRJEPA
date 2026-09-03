@@ -89,8 +89,11 @@ def render(results: Mapping) -> str:
             n = counts.get(name)
             rate = prevalence.get(name)
             row.append("--" if n is None else f"{n} ({_fmt(rate, 4)})")
+        row.append(entry.get("note", ""))
         rows.append(row)
-    lines += _table(["task", "train n (rate)", "tuning n (rate)", f"{split} n (rate)"], rows) + [""]
+    lines += _table(
+        ["task", "train n (rate)", "tuning n (rate)", f"{split} n (rate)", "note"], rows
+    ) + [""]
 
     for metric, digits in (("auroc", 3), ("auprc", 3), ("brier", 4), ("calibration_slope", 3)):
         lines.append(f"## {metric.replace('_', ' ').upper()}")
@@ -173,3 +176,25 @@ def write(results: Mapping, out_dir: Path | str, stem: str = "results") -> tuple
         json.dump(results, handle, indent=2, default=str)
     md_path.write_text(render(results))
     return md_path, json_path
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """``python -m ehrjepa.eval.report <results.json>`` -- re-render the markdown.
+
+    Formatting changes should not cost a re-run, so the JSON is the record and
+    this regenerates the table beside it.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Re-render results.md from results.json")
+    parser.add_argument("results", type=Path)
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    results = json.loads(args.results.read_text())
+    out = args.results.with_suffix(".md")
+    out.write_text(render(results))
+    print(f"wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
