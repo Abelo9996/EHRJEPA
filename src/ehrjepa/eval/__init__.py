@@ -11,7 +11,7 @@ through :class:`ehrjepa.eval.history.HistoryReader` -- rather than a convention.
 :mod:`~ehrjepa.eval.tasks`     anchors and labels, ACES over a seeded anchor rule
 :mod:`~ehrjepa.eval.history`   pre-anchor history out of the tensor cache
 :mod:`~ehrjepa.eval.baselines` count features, logistic regression, gradient boosting
-:mod:`~ehrjepa.eval.probe`     frozen-encoder embeddings, probes, few-shot
+:mod:`~ehrjepa.eval.probe`     frozen-encoder embeddings (JEPA or AR), probes, few-shot
 :mod:`~ehrjepa.eval.metrics`   AUROC/AUPRC/Brier/calibration, bootstrap CIs
 :mod:`~ehrjepa.eval.report`    markdown rendering of a results dict
 :mod:`~ehrjepa.eval.run`       the CLI that ties the above together

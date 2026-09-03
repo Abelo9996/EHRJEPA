@@ -378,3 +378,37 @@ def test_five_step_ar_run_on_the_debug_config_is_fast_and_logs(tmp_path: Path) -
     model, max_len = probe.load_encoder(tmp_path / "final.pt")
     assert isinstance(model, EHRAR)
     assert max_len == 64
+
+
+def test_probe_scaler_neutralises_a_constant_column_instead_of_amplifying_it() -> None:
+    """A causal encoder's CLS block is constant up to float32 noise.
+
+    sklearn only neutralises *exactly* zero variance, so without the guard that
+    block arrives at the probe as unit-variance numerical noise competing for the
+    same L2 budget as the real features.
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    from ehrjepa.eval.baselines import _neutralise_constant_columns, fit_logistic
+
+    rng = np.random.default_rng(0)
+    signal = rng.normal(size=(400, 4))
+    constant = np.float32(0.8399) + rng.normal(scale=1e-7, size=(400, 2)).astype(np.float32)
+    x = np.hstack([signal, constant]).astype(np.float32)
+
+    raw = StandardScaler().fit(x)
+    assert (raw.scale_[4:] < 1e-5).all(), "the fixture must actually be near-constant"
+
+    guarded = StandardScaler().fit(x)
+    assert _neutralise_constant_columns(guarded) == 2
+    assert (guarded.scale_[4:] == 1.0).all()
+    assert np.allclose(guarded.scale_[:4], raw.scale_[:4]), "real columns untouched"
+
+    # The noise columns come out at their own tiny scale rather than at unit scale.
+    assert np.abs(guarded.transform(x)[:, 4:]).max() < 1e-5
+    assert np.abs(raw.transform(x)[:, 4:]).max() > 1.0
+
+    # And the fit itself still works, on features that include the dead block.
+    y = (signal[:, 0] + rng.normal(scale=0.5, size=400) > 0).astype(int)
+    model = fit_logistic(x[:200], y[:200], x[200:], y[200:], seed=0)
+    assert np.isfinite(model.predict_proba(x[200:])).all()

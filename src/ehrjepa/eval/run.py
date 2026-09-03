@@ -12,6 +12,11 @@ subset.
     python -m ehrjepa.eval.run --source desynpuf-s1 --tasks all \\
         --models lr,gbm,random_init,ckpt:runs/sanity-A-default/final.pt \\
         --out docs/experiments/2026-09-03-eval-desynpuf/
+
+A ``ckpt:`` model can be either pretraining objective: the checkpoint says which,
+and :func:`ehrjepa.eval.probe.load_encoder` builds the matching architecture.
+``--probe-features`` and ``--probe-layer`` choose how a frozen encoder is pooled;
+both default to what earlier runs used, so the recorded numbers reproduce.
 """
 
 from __future__ import annotations
