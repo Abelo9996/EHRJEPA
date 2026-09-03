@@ -1,0 +1,29 @@
+# ACES task template: first-ever occurrence of a condition within 365 days.
+#
+# `condition` is bound to one chronic condition's codes per run (see
+# configs/tasks/predicates.yaml). The input window carries the exclusion: a
+# subject with any occurrence of the condition at or before the anchor is
+# dropped, so the label is a *new* diagnosis rather than a prevalent one.
+predicates:
+  anchor:
+    code: anchor
+  condition:
+    code: condition
+
+trigger: anchor
+
+windows:
+  input:
+    start: null
+    end: trigger
+    start_inclusive: true
+    end_inclusive: true
+    index_timestamp: end
+    has:
+      condition: (0, 0)
+  target:
+    start: trigger
+    end: start + 365 days
+    start_inclusive: false
+    end_inclusive: true
+    label: condition

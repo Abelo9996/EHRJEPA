@@ -1,0 +1,22 @@
+# ACES task: any inpatient admission within 365 days of the anchor.
+predicates:
+  anchor:
+    code: anchor
+  inpatient_admission:
+    code: inpatient_admission
+
+trigger: anchor
+
+windows:
+  input:
+    start: null
+    end: trigger
+    start_inclusive: true
+    end_inclusive: true
+    index_timestamp: end
+  target:
+    start: trigger
+    end: start + 365 days
+    start_inclusive: false
+    end_inclusive: true
+    label: inpatient_admission

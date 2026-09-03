@@ -1,0 +1,25 @@
+# ACES task: another inpatient admission within 30 days of an inpatient
+# discharge. The anchor rule is overridden for this task -- anchors are drawn
+# from inpatient discharge events only -- but the anchor predicate is set the
+# same way, by ehrjepa.eval.tasks, before ACES runs.
+predicates:
+  anchor:
+    code: anchor
+  inpatient_admission:
+    code: inpatient_admission
+
+trigger: anchor
+
+windows:
+  input:
+    start: null
+    end: trigger
+    start_inclusive: true
+    end_inclusive: true
+    index_timestamp: end
+  target:
+    start: trigger
+    end: start + 30 days
+    start_inclusive: false
+    end_inclusive: true
+    label: inpatient_admission

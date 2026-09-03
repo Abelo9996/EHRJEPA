@@ -1,0 +1,27 @@
+# ACES task: death within 365 days of the anchor.
+#
+# `anchor` is a synthetic predicate: ehrjepa.eval.tasks selects one anchor time
+# per subject (seeded, >= 32 events strictly before it, follow-up or death
+# within the horizon, strictly before MEDS_DEATH) and sets this predicate at
+# exactly that timestamp in the predicates dataframe handed to ACES.
+predicates:
+  anchor:
+    code: anchor
+  death:
+    code: death
+
+trigger: anchor
+
+windows:
+  input:
+    start: null
+    end: trigger
+    start_inclusive: true
+    end_inclusive: true
+    index_timestamp: end
+  target:
+    start: trigger
+    end: start + 365 days
+    start_inclusive: false
+    end_inclusive: true
+    label: death

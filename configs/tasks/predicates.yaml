@@ -1,0 +1,67 @@
+# Concept -> per-source code matchers.
+#
+# ACES task YAMLs in this directory are written against *concept* names
+# (`death`, `inpatient_admission`, `condition`, ...). They are evaluated through
+# ACES' `direct` data standard, which takes a pre-computed predicates dataframe
+# whose columns are the predicate names, so this file is what turns a concept
+# into the source's own codes. Codes are not harmonised across sources (see
+# src/ehrjepa/data/README.md); this table is the only place that knows the
+# difference.
+#
+# `codes` matches exactly, `prefixes` matches `str.startswith`. A concept that
+# has no entry for a source does not exist there, and every task that needs it
+# is skipped on that source.
+
+dataset_families:
+  "CMS DE-SynPUF": desynpuf
+  Synthea: synthea
+  MIMIC-IV: mimic
+
+concepts:
+  death:
+    desynpuf: {codes: [MEDS_DEATH]}
+    synthea: {codes: [MEDS_DEATH]}
+    mimic: {codes: [MEDS_DEATH]}
+
+  inpatient_admission:
+    desynpuf: {codes: ["ADMISSION//INPATIENT"]}
+    synthea: {codes: ["ENCOUNTER//INPATIENT"]}
+    # meds_etl emits one MIMIC_IV_Admission/<admission_type> event per hospital
+    # stay; every admission type is an inpatient hospitalisation.
+    mimic: {prefixes: ["MIMIC_IV_Admission/"]}
+
+  inpatient_discharge:
+    desynpuf: {codes: ["DISCHARGE//INPATIENT"]}
+    # Synthea has only a class-less END//ENCOUNTER, so there is no inpatient
+    # discharge event and readmission_30d is skipped on this source.
+    mimic: {prefixes: ["MIMIC_IV_Discharge_Location/"]}
+
+  # --- chronic conditions, first-ever occurrence tasks ---------------------- #
+  dx_diabetes:
+    desynpuf: {prefixes: ["ICD9CM//250"]}
+    synthea: {codes: ["SNOMED//44054006"]}
+    mimic: {prefixes: ["ICD9CM/250", "ICD10CM/E10", "ICD10CM/E11"]}
+
+  dx_heart_failure:
+    desynpuf: {prefixes: ["ICD9CM//428"]}
+    synthea: {codes: ["SNOMED//88805009"]}
+    mimic: {prefixes: ["ICD9CM/428", "ICD10CM/I50"]}
+
+  dx_ckd:
+    desynpuf: {prefixes: ["ICD9CM//585"]}
+    synthea:
+      codes:
+        - "SNOMED//431855005"
+        - "SNOMED//431856006"
+        - "SNOMED//433144002"
+        - "SNOMED//127013003"
+    mimic: {prefixes: ["ICD9CM/585", "ICD10CM/N18"]}
+
+  dx_copd:
+    # 493 (asthma) is deliberately not part of the 49x range used here.
+    desynpuf:
+      prefixes: ["ICD9CM//490", "ICD9CM//491", "ICD9CM//492", "ICD9CM//494", "ICD9CM//496"]
+    synthea: {codes: ["SNOMED//185086009", "SNOMED//87433001"]}
+    mimic:
+      prefixes: ["ICD9CM/491", "ICD9CM/492", "ICD9CM/496", "ICD10CM/J41", "ICD10CM/J42",
+                 "ICD10CM/J43", "ICD10CM/J44"]
