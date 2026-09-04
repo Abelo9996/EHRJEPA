@@ -599,6 +599,28 @@ def test_unknown_pooling_is_rejected(tmp_path: Path) -> None:
 def test_parse_models_rejects_random_init_without_an_architecture() -> None:
     with pytest.raises(ValueError, match="architecture"):
         run.parse_models(["lr", "random_init"])
+
+
+def test_probe_device_prefers_cuda_over_mps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``probe._device`` must agree with ``resolve_device``'s CUDA > MPS > CPU order.
+
+    A prior version of this function checked MPS before CUDA -- harmless on a
+    Mac (no CUDA) or a CUDA box (no MPS) since only one backend is ever really
+    available, but a silent second copy of the device policy that a CUDA+MPS
+    environment (or a future backend) would have picked wrong.
+    """
+    monkeypatch.setattr(probe.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(probe.torch.backends.mps, "is_available", lambda: True)
+    assert probe._device().type == "cuda"
+
+    monkeypatch.setattr(probe.torch.cuda, "is_available", lambda: False)
+    assert probe._device().type == "mps"
+
+    monkeypatch.setattr(probe.torch.backends.mps, "is_available", lambda: False)
+    assert probe._device().type == "cpu"
+
+    # An explicit override always wins, regardless of what is available.
+    assert probe._device("cpu").type == "cpu"
     specs = run.parse_models(["lr", "gbm", "ckpt:runs/x/final.pt", "random_init"])
     assert [s.name for s in specs] == ["lr", "gbm", "ckpt:x", "random_init"]
     assert specs[-1].random_init and specs[-1].checkpoint == Path("runs/x/final.pt")

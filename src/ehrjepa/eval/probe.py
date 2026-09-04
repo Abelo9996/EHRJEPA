@@ -56,6 +56,7 @@ from ehrjepa.eval.history import HistoryReader, anchor_minutes
 from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig
 from ehrjepa.models.latent import LATENT_MODELS
+from ehrjepa.utils.runtime import resolve_device
 
 __all__ = [
     "AUTO_FEATURES",
@@ -152,13 +153,14 @@ def load_encoder(
 
 
 def _device(name: str | None = None) -> torch.device:
-    if name:
-        return torch.device(name)
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():  # pragma: no cover - no CUDA on this machine
-        return torch.device("cuda")
-    return torch.device("cpu")
+    """Resolve a device name, defaulting to CUDA, then MPS, then CPU.
+
+    Delegates to :func:`ehrjepa.utils.runtime.resolve_device` so eval and
+    training pick devices with the same priority order -- this used to check
+    MPS before CUDA, which is harmless on a Mac (no CUDA) or a CUDA box (no
+    MPS) but was still a second, drifting copy of the same policy.
+    """
+    return resolve_device(name or "auto")
 
 
 @torch.no_grad()
