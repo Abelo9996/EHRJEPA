@@ -1,0 +1,95 @@
+# Phase 5c: with code reconstruction present, does the latent prediction term
+# still add anything -- and do the notime and recon gains stack?
+#
+# Grid 2's `jepa_recon` (lambda_recon 0.1 on top of the unchanged jepa_ema
+# reference) and `jepa_notime` (mask_token_time false, no recon) each moved on
+# their own. Neither grid ever ran them together, and neither grid ever asked
+# whether the latent smooth-L1 term is doing anything once the auxiliary
+# code-CE term is there to carry the encoder's gradient. `objective.lambda_pred`
+# (new: default 1.0, weights the latent term, 0 drops it and skips the target
+# pass entirely) makes both questions askable in the same grid:
+#
+#   1. jepa_recon_notime -- notime plus recon together, against grid 2's two
+#      single-flag cells.
+#   2. recon_only / recon_only_notime -- lambda_pred 0: the latent term is gone,
+#      so any signal left is code reconstruction alone, with and without notime.
+#      Against (1), this is the answer to "does the latent term add anything
+#      once reconstruction is present."
+#   3. jepa_recon_nosig -- lambda_sigreg 0 instead of dropping lambda_pred: the
+#      anti-collapse term gone rather than the prediction term, so a move in (1)
+#      relative to this cell is attributable to SIGReg rather than to recon.
+#
+# Reading (2) against (1) says whether the latent term is pulling its weight.
+# Reading recon_only against recon_only_notime, and comparing that gap to
+# jepa_recon's gap over grid 2's unchanged reference, says whether the notime
+# gain and the recon gain are additive or the same shortcut closed twice.
+#
+# Same base config, budget, seed and eval subset as grid 2 -- pretrain_pilot.yaml
+# already defaults model.target_mode to ema and objective.lambda_sigreg to 0.05,
+# restated below per cell for the same reason grid 2 restated them: so each row
+# is readable without cross-referencing the base file.
+#
+# Every cell here builds a recon_head (lambda_recon 0.1 throughout), so the
+# architecture -- and therefore the untrained control -- is identical across all
+# four rows; one random_init control, computed against the first cell, covers
+# the grid.
+
+name: 2026-09-04-pilot3-desynpuf
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 48000000
+seed: 0
+
+# Identical to grid 2 and to the phase-4 evaluation.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+control_runs: [jepa_recon_notime]
+
+runs:
+  # (a) The notime shortcut closed AND code reconstruction on, together.
+  - name: jepa_recon_notime
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1
+      predictor.mask_token_time: false
+
+  # (b) The latent term dropped entirely (lambda_pred 0): whatever the
+  # predictor learns, it learns purely to name each target's code. The target
+  # pass never runs -- see EHRJEPA.forward's compute_targets.
+  - name: recon_only
+    overrides:
+      objective.kind: jepa
+      objective.lambda_pred: 0
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      predictor.mask_token_time: true
+
+  # (c) The same, plus notime -- though with the latent term already gone,
+  # mask_token_time has nothing left to leak into.
+  - name: recon_only_notime
+    overrides:
+      objective.kind: jepa
+      objective.lambda_pred: 0
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      predictor.mask_token_time: false
+
+  # (d) Notime plus recon, SIGReg off instead of the latent term: isolates
+  # whether a move in (a) is about the anti-collapse term rather than recon.
+  - name: jepa_recon_nosig
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0
+      objective.lambda_recon: 0.1
+      predictor.mask_token_time: false
