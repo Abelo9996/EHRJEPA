@@ -1,0 +1,124 @@
+# Phase 5d: does a *causal* latent objective transfer, alone and with code
+# supervision?
+#
+# Grids 1-3 measured, on this cache at this budget with linear probes on the
+# same 3,000 held-out subjects, against each cell's own untrained control and
+# averaged over the seven tasks: next-code AR +5 AUROC points; masked-span
+# latent JEPA 0, under every target/masking/SIGReg variant tried; JEPA plus
+# auxiliary code reconstruction on the predictor's outputs +2.5; and code
+# reconstruction with the latent term switched off (`lambda_pred: 0`) also
+# +2.5. The latent term adds nothing at this scale. What AR has and masked-span
+# JEPA does not is a loss term at *every* position and a discrete target.
+#
+# This grid keeps the latent target and takes the density. Two designs, both
+# causal (see src/ehrjepa/models/latent.py):
+#
+#   nextlatent  predict the target encoder's latent at i+k from h_i, at every
+#               valid position -- as dense as the AR loss, target still a
+#               representation. `horizons: [1]` is one head; `[1, 4, 16]` adds
+#               two coarser look-aheads whose losses are averaged.
+#   window      predict the mean-pooled target latent of everything in the next
+#               30 or 365 days, from the encoder output just before each of
+#               K = 8 sampled anchors. Far fewer terms, but each is a summary of
+#               a horizon the downstream tasks actually ask about.
+#
+# `lambda_recon` means a different auxiliary term per design, in both cases the
+# same tied code head: next-code cross-entropy from h_i for `nextlatent` (so the
+# recon cell is a literal AR+JEPA hybrid, and `lambda_pred: 0` there would be AR
+# and nothing else), and multi-label BCE over the horizon's code set for
+# `window` (TransformEHR-style).
+#
+# Measured on this cache before the grid was queued, at max_len 256 with 8
+# anchors per window: 71% of anchors have an observed, non-empty 30-day horizon
+# inside the window and 47% have a 365-day one; the rest are skipped and the
+# fraction is logged per step as `skipped_frac`. A kept 30-day pool averages 6.5
+# events and a 365-day pool 44.
+#
+# Same base config, budget, seed, held-out subset, bootstrap count and count
+# baselines as grids 1-3. `ar` and `recon_only` already have rows in grids 1-3
+# and are not rerun here; read this grid against those.
+#
+# One `random_init` control covers all five cells: the probe reads only the
+# embedding and the encoder, both are the same causal 4x192 stack in every cell,
+# and both are constructed before any head, so an untrained `window` model and
+# an untrained `nextlatent` model give a probe the same weights.
+
+name: 2026-09-04-pilot4-desynpuf
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 48000000
+seed: 0
+
+# Identical to grids 2 and 3 and to the phase-4 evaluation.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+control_runs: [nextlatent_h1]
+
+runs:
+  # (1) The dense latent objective at its simplest: predict the next event's
+  # latent, at every position, nothing else in the loss but SIGReg.
+  - name: nextlatent_h1
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1]
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0
+
+  # (2) The same, plus two coarser look-aheads. If the next-event latent is
+  # mostly a short-range clock, the 4- and 16-step heads are where a longer
+  # dependency would have to show up.
+  - name: nextlatent_h1416
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0
+
+  # (3) (2) plus the AR term at the weight grids 2 and 3 used for
+  # reconstruction. Against (2) this says whether the latent term adds anything
+  # to code supervision when the code supervision is dense; against grid 1's
+  # `ar` row it says whether the latent term costs anything.
+  - name: nextlatent_h1416_recon
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1
+
+  # (4) The window design alone: 8 anchors per window, 30- and 365-day pooled
+  # targets, no code supervision anywhere in the loss.
+  - name: window_30_365
+    overrides:
+      objective.kind: window
+      model.causal: true
+      model.target_mode: ema
+      objective.window_horizons: [30, 365]
+      objective.window_anchors: 8
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0
+
+  # (5) (4) plus the multi-label BCE over each horizon's code set, at the same
+  # weight (3) gives the AR term.
+  - name: window_30_365_recon
+    overrides:
+      objective.kind: window
+      model.causal: true
+      model.target_mode: ema
+      objective.window_horizons: [30, 365]
+      objective.window_anchors: 8
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1

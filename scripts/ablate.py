@@ -296,9 +296,11 @@ def _train_entry(grid: Grid, item: GridRun) -> dict:
         # network, no SIGReg term and no context/target masking. Reporting the
         # base config's values there would invite a reader to compare a column
         # that does not exist in that run.
-        "target_mode": _jepa_only(config, str(config.model.get("target_mode", "shared"))),
-        "lambda_sigreg": _jepa_only(config, config.objective.lambda_sigreg),
-        "p_future": _jepa_only(config, config.masking.p_future),
+        "target_mode": _latent_only(
+            config.objective.kind, str(config.model.get("target_mode", "shared"))
+        ),
+        "lambda_sigreg": _latent_only(config.objective.kind, config.objective.lambda_sigreg),
+        "p_future": _masked_only(config.objective.kind, config.masking.p_future),
         "out_dir": str(out_dir),
         "checkpoint": str(out_dir / "final.pt"),
         "reuse": False,
@@ -321,18 +323,15 @@ def _reuse_entry(item: GridRun) -> dict:
     max_len = int(config["data"]["max_len"])
     steps = int(config["run"]["steps"])
 
-    def jepa_only(value: Any) -> Any:
-        return None if kind == "ar" else value
-
     return {
         "batch_size": batch_size,
         "max_len": max_len,
         "steps": steps,
         "tokens": steps * batch_size * max_len,
         "objective": kind,
-        "target_mode": jepa_only(str(config["model"].get("target_mode", "shared"))),
-        "lambda_sigreg": jepa_only(config["objective"]["lambda_sigreg"]),
-        "p_future": jepa_only(config["masking"]["p_future"]),
+        "target_mode": _latent_only(kind, str(config["model"].get("target_mode", "shared"))),
+        "lambda_sigreg": _latent_only(kind, config["objective"]["lambda_sigreg"]),
+        "p_future": _masked_only(kind, config["masking"]["p_future"]),
         "out_dir": str(source),
         "checkpoint": str(checkpoint),
         "reuse": True,
@@ -347,8 +346,20 @@ def _short(path: Path) -> str:
         return str(path)
 
 
-def _jepa_only(config: Any, value: Any) -> Any:
-    return None if config.objective.kind == "ar" else value
+def _latent_only(kind: str, value: Any) -> Any:
+    """Blank for ``ar``, which has no target network and no SIGReg term."""
+    return None if kind == "ar" else value
+
+
+def _masked_only(kind: str, value: Any) -> Any:
+    """Blank for everything but ``jepa``: only it samples context/target masks.
+
+    The causal objectives take their context from the attention mask and their
+    targets from a horizon, so reporting the base config's ``p_future`` on one of
+    their rows would invite a reader to compare a column that does not exist in
+    that run.
+    """
+    return value if kind == "jepa" else None
 
 
 def _load_rows(path: Path) -> list[dict]:
