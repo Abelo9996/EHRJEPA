@@ -322,7 +322,11 @@ class Trainer:
         )
         context_mask = context_mask.to(self.device)
         target_mask = target_mask.to(self.device)
-        output = self.model(batch, context_mask, target_mask)
+        # objective.lambda_pred == 0 means nothing pulls on the target latent, so
+        # the target pass (an EMA copy's full encoder forward, or a shared-weight
+        # re-embedding) is pure waste; skip it.
+        compute_targets = self.config.objective.lambda_pred != 0.0
+        output = self.model(batch, context_mask, target_mask, compute_targets=compute_targets)
         losses = self.objective(output)
         return losses, output
 
@@ -381,7 +385,10 @@ class Trainer:
             )
             self.optimizer.step()
             momentum = float("nan")
-            if self.model.uses_ema:
+            # No target pass this step (lambda_pred == 0) means the target
+            # encoder was never read from, so there is nothing for the EMA
+            # update to keep in sync with -- skip moving it too.
+            if self.model.uses_ema and cfg.objective.lambda_pred != 0.0:
                 momentum = ema_momentum(
                     self.step, run.steps, self.model_config.ema_start, self.model_config.ema_end
                 )

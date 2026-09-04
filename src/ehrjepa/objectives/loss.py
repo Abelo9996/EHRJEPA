@@ -2,7 +2,7 @@
 
 .. math::
 
-    \\mathcal{L} = \\mathcal{L}_{\\text{pred}}
+    \\mathcal{L} = \\lambda_{\\text{pred}} \\mathcal{L}_{\\text{pred}}
       + \\lambda \\left( \\mathrm{SIGReg}(\\text{tokens})
                        + \\mathrm{SIGReg}(\\text{CLS}) \\right)
 
@@ -11,6 +11,14 @@ encoder's representations at the target positions, layer-normalised. The
 LayerNorm is on the *target* side only and is what stops the trivial solution of
 shrinking every target latent toward zero: the loss cannot be reduced by scaling
 the targets down, only by predicting their direction and shape.
+
+``lambda_pred`` defaults to ``1.0``. At ``0.0`` the term drops out of the total
+entirely (not multiplied in -- the caller upstream never computed a real target
+to multiply against, see :meth:`~ehrjepa.models.jepa.EHRJEPA.forward`'s
+``compute_targets``), so ``lambda_pred: 0`` with ``lambda_recon`` positive gives
+a pure masked-code-prediction objective through the same predictor. The
+``pred_loss`` diagnostic is logged as ``NaN`` in that case rather than a number
+computed against a placeholder target.
 
 SIGReg is applied twice, at both granularities the model produces: to the valid
 token outputs of the (gradient-carrying) context encoder pass, subsampled to at
@@ -74,6 +82,10 @@ class ObjectiveConfig:
     #: AR only: positions per slice of the vocabulary projection. See
     #: :func:`ehrjepa.objectives.ar.ar_loss_chunked`.
     ar_chunk: int = 2048
+    #: Weight on the latent smooth-L1 prediction term. ``0.0`` drops the term
+    #: (not a zero-weighted multiply -- the model skips computing a real target
+    #: to multiply against) and logs ``pred_loss`` as ``NaN``.
+    lambda_pred: float = 1.0
     lambda_sigreg: float = 0.05
     smooth_l1_beta: float = 1.0
     sigreg_directions: int = DEFAULT_N_DIRECTIONS
@@ -129,24 +141,35 @@ class JEPAObjective(nn.Module):
         )
 
     def forward(self, output: JEPAOutput, valid_mask: Tensor | None = None) -> dict[str, Tensor]:
-        """Return ``loss`` plus its three components, all scalar tensors.
+        """Return ``loss`` plus its components, all scalar tensors.
 
         ``valid_mask`` selects the token rows SIGReg sees; it defaults to the
         context mask, i.e. exactly the positions the encoder attended to.
+
+        When ``lambda_pred`` is ``0``, ``output.targets`` is the zero placeholder
+        :meth:`EHRJEPA.forward <ehrjepa.models.jepa.EHRJEPA.forward>` returns for
+        ``compute_targets=False`` -- a real ``smooth_l1`` against it would be
+        cheap to compute but meaningless, so it is skipped and ``pred_loss`` is
+        reported as ``NaN`` instead.
         """
         cfg = self.config
-        pred_loss = jepa_loss(output.predictions, output.targets, beta=cfg.smooth_l1_beta)
+        zero = output.predictions.new_zeros(())
+        if cfg.lambda_pred == 0.0:
+            pred_loss = output.predictions.new_full((), float("nan"))
+            pred_term = zero
+        else:
+            pred_loss = jepa_loss(output.predictions, output.targets, beta=cfg.smooth_l1_beta)
+            pred_term = cfg.lambda_pred * pred_loss
 
         mask = output.context_mask if valid_mask is None else valid_mask.bool()
         rows = output.context_tokens[mask]
-        zero = pred_loss.new_zeros(())
         if cfg.lambda_sigreg == 0.0:
             sig_tokens, sig_cls = zero, zero
         else:
             sig_tokens = self.sigreg(rows.float())
             sig_cls = self.sigreg(output.cls.float())
         recon, recon_value = self.reconstruction(output)
-        total = pred_loss + cfg.lambda_sigreg * (sig_tokens + sig_cls)
+        total = pred_term + cfg.lambda_sigreg * (sig_tokens + sig_cls)
         if cfg.lambda_recon != 0.0:
             total = total + cfg.lambda_recon * (recon + recon_value)
         return {

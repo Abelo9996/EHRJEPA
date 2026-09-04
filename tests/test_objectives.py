@@ -227,6 +227,54 @@ def test_reconstruction_loss_falls_on_a_memorizable_batch() -> None:
     assert last_value < first_value - 0.1
 
 
+def test_lambda_pred_zero_drops_the_prediction_term_and_logs_nan() -> None:
+    """``lambda_pred: 0`` -> loss is exactly ``lambda_recon * recon`` plus SIGReg.
+
+    ``output.targets`` here stands in for the zero placeholder
+    :meth:`EHRJEPA.forward <ehrjepa.models.jepa.EHRJEPA.forward>` returns for
+    ``compute_targets=False`` -- the objective must not fold a term computed
+    against it into the total, and must report ``pred_loss`` as ``NaN`` rather
+    than a real-looking number.
+    """
+    torch.manual_seed(0)
+    model = _recon_model(recon_head=True)
+    batch = _recon_batch()
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(3)
+    )
+    out = model(batch, context, target, compute_targets=False)
+    assert torch.equal(out.targets, torch.zeros_like(out.predictions))
+
+    objective = JEPAObjective(
+        ObjectiveConfig(lambda_pred=0.0, lambda_recon=0.1, lambda_sigreg=0.05),
+        recon_head=model.recon_head,
+    )
+    losses = objective(out)
+    assert math.isnan(float(losses["pred_loss"]))
+
+    expected = 0.1 * float(losses["recon_loss"]) + 0.05 * (
+        float(losses["sigreg_tokens"]) + float(losses["sigreg_cls"])
+    )
+    assert float(losses["loss"].detach()) == pytest.approx(expected, rel=1e-5)
+
+
+def test_lambda_pred_default_reproduces_the_full_loss() -> None:
+    """The default (``lambda_pred: 1``) must be a pure pass-through of ``pred_loss``."""
+    torch.manual_seed(0)
+    model = _recon_model()
+    batch = _recon_batch()
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(3)
+    )
+    out = model(batch, context, target)
+    objective = JEPAObjective(ObjectiveConfig(lambda_sigreg=0.05))
+    losses = objective(out)
+    expected = float(losses["pred_loss"]) + 0.05 * (
+        float(losses["sigreg_tokens"]) + float(losses["sigreg_cls"])
+    )
+    assert float(losses["loss"].detach()) == pytest.approx(expected, rel=1e-6)
+
+
 def test_reconstruction_head_is_tied_and_not_double_counted() -> None:
     """The head reuses the code table; the objective must not register it twice."""
     model = _recon_model(recon_head=True)

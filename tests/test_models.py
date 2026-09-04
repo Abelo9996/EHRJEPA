@@ -352,3 +352,34 @@ def test_shared_target_mode_has_no_second_encoder() -> None:
 def test_unknown_target_mode_is_rejected() -> None:
     with pytest.raises(ValueError, match="target_mode"):
         _config(target_mode="teacher")
+
+
+def test_compute_targets_false_never_calls_the_target_encoder() -> None:
+    """``lambda_pred: 0`` skips the target pass -- the model must actually skip it."""
+    model = EHRJEPA(_config(target_mode="ema")).eval()
+    batch = _batch()
+    context, target = sample_masks(
+        batch["attention_mask"], generator=torch.Generator().manual_seed(1)
+    )
+
+    calls = []
+    real_forward = model.target_encoder.forward
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real_forward(*args, **kwargs)
+
+    model.target_encoder.forward = counting
+    out = model(batch, context, target, compute_targets=False)
+    model.target_encoder.forward = real_forward
+
+    assert calls == []
+    assert torch.equal(out.targets, torch.zeros_like(out.predictions))
+    assert out.predictions.shape == out.targets.shape
+
+    calls.clear()
+    model.target_encoder.forward = counting
+    out_with_targets = model(batch, context, target, compute_targets=True)
+    model.target_encoder.forward = real_forward
+    assert len(calls) >= 1
+    assert not torch.equal(out_with_targets.targets, torch.zeros_like(out_with_targets.targets))

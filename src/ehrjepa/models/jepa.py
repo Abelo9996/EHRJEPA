@@ -39,6 +39,11 @@ soluble without the encoder:
 ``time_feature_dropout`` drops both time terms per token on the *online* pass, so
 that under shared or EMA weights the encoder has seen inputs shaped like the
 content-only ones the target pass produces.
+
+``objective.lambda_pred``
+    Weight on the prediction loss. At ``0`` the target pass is skippable --
+    see ``forward``'s ``compute_targets`` -- and, with ``objective.lambda_recon``
+    positive, the predictor is trained purely to name each target's code.
 """
 
 from __future__ import annotations
@@ -323,37 +328,54 @@ class EHRJEPA(nn.Module):
         batch: Mapping[str, Tensor],
         context_mask: Tensor,
         target_mask: Tensor,
+        compute_targets: bool = True,
     ) -> JEPAOutput:
+        """``compute_targets=False`` skips the target pass entirely.
+
+        Set by the caller when ``objective.lambda_pred`` is 0: with no
+        prediction-loss term to feed, the target encoder's forward pass (an EMA
+        copy's full encoder call, or a re-embedding under shared weights) is pure
+        waste, so it is never run and ``targets`` comes back as a zero
+        placeholder of the right shape instead. The predictor still runs -- a
+        ``lambda_pred: 0`` / ``lambda_recon > 0`` config predicts codes through
+        the same predictor, just with nothing pulling on the latent itself.
+        """
         context_mask = context_mask.bool()
         target_mask = target_mask.bool()
         tokens = self.embed_batch(batch)
         context = self.encoder(tokens, context_mask)
+        index = target_mask.nonzero(as_tuple=True)
 
-        with torch.no_grad():
-            if self.config.target_span_only:
-                target_repr = self._span_targets(batch, target_mask).detach()
-            elif self.uses_ema or not self.config.target_time_features:
-                # The shared-weight path re-embeds only when it has to: with the
-                # time terms on, the online tokens are the same tensor.
-                assert self.target_encoder is not None or not self.uses_ema
-                target_tokens = self.embed_batch(batch, target_side=True)
-                _, encoder = self._target_stack
-                target_repr = encoder(target_tokens, batch["attention_mask"]).tokens.detach()
-            else:
-                target_repr = self.encoder(tokens.detach(), batch["attention_mask"]).tokens.detach()
+        target_repr: Tensor | None = None
+        if compute_targets:
+            with torch.no_grad():
+                if self.config.target_span_only:
+                    target_repr = self._span_targets(batch, target_mask).detach()
+                elif self.uses_ema or not self.config.target_time_features:
+                    # The shared-weight path re-embeds only when it has to: with
+                    # the time terms on, the online tokens are the same tensor.
+                    assert self.target_encoder is not None or not self.uses_ema
+                    target_tokens = self.embed_batch(batch, target_side=True)
+                    _, encoder = self._target_stack
+                    target_repr = encoder(target_tokens, batch["attention_mask"]).tokens.detach()
+                else:
+                    target_repr = self.encoder(
+                        tokens.detach(), batch["attention_mask"]
+                    ).tokens.detach()
 
         predicted = self.predictor(
             context.tokens, batch["age"], batch["log_delta"], context_mask, target_mask
         )
-        index = target_mask.nonzero(as_tuple=True)
+        predictions = predicted[index]
+        targets = target_repr[index] if target_repr is not None else torch.zeros_like(predictions)
         extras: dict[str, Tensor] = {}
         if self.recon_head is not None:
             extras["recon_code_id"] = batch["code_id"][index]
         if self.recon_value_head is not None:
             extras["recon_value_bin"] = batch["value_bin"][index]
         return JEPAOutput(
-            predictions=predicted[index],
-            targets=target_repr[index],
+            predictions=predictions,
+            targets=targets,
             target_index=index,
             context_tokens=context.tokens,
             context_mask=context_mask,
