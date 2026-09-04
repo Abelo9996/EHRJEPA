@@ -7,8 +7,10 @@ cohort, one token budget, one seed. Source directories:
 [`2026-09-04-pilot3-desynpuf/`](2026-09-04-pilot3-desynpuf/) (grid 3),
 [`2026-09-04-pilot4-desynpuf/`](2026-09-04-pilot4-desynpuf/) (grid 4). Each
 directory's `README.md` is the protocol written before its numbers existed;
-each `summary.md` is the row source this table is built from. Grid 5 (seed
-sweep) is training now and is not part of this document.
+each `summary.md` is the row source this table is built from. Grid 5 (a seed
+sweep of `ar` and the hybrid) and a few-shot pass over all eight models are
+reported below in their own sections and are not merged into the master
+table, which stays grids 1-4 at seed 0.
 
 Common to every row below: `configs/pretrain_pilot.yaml` base (4-layer,
 192-wide encoder, 2-layer, 96-wide predictor, SwiGLU, dropout 0.1),
@@ -126,10 +128,76 @@ already committed in one of those tables. Regenerate with:
 python scripts/plot_grids.py
 ```
 
+## Grid 5: seeds
+
+Source: [`2026-09-04-pilot5-seeds-desynpuf/`](2026-09-04-pilot5-seeds-desynpuf/).
+Grid 1's `ar` and grid 4's `nextlatent_h1416_recon` (the hybrid) reseeded at
+`run.seed` 1 and 2 (`ar_s1`/`ar_s2`, `hybrid_s1`/`hybrid_s2`), same base
+config, same 48M-token budget, same `desynpuf-s1` cache, same held-out subset
+and bootstrap protocol as grids 1-4. `random_init@ar_s1` and
+`random_init@hybrid_s1` are each computed once and shared across their
+architecture's three seeds (see the grid's own README for why re-deriving a
+control per seed would repeat the identical `torch.manual_seed(0)` draw).
+
+3-seed mean and std of held-out AUROC, `{ar, ar_s1, ar_s2}` vs.
+`{nextlatent_h1416_recon, hybrid_s1, hybrid_s2}`, per task:
+
+| task | ar mean ± std | ar range | hybrid mean ± std | hybrid range |
+|---|---|---|---|---|
+| `inpatient_365d` | 0.7417 ± 0.0027 | [0.7392, 0.7455] | 0.7445 ± 0.0025 | [0.7417, 0.7479] |
+| `mortality_365d` | 0.6034 ± 0.0061 | [0.5951, 0.6094] | 0.6219 ± 0.0109 | [0.6072, 0.6332] |
+| `new_dx_365d/ckd` | 0.7480 ± 0.0044 | [0.7419, 0.7514] | 0.7525 ± 0.0018 | [0.7501, 0.7543] |
+| `new_dx_365d/copd` | 0.7604 ± 0.0009 | [0.7592, 0.7613] | 0.7515 ± 0.0023 | [0.7487, 0.7544] |
+| `new_dx_365d/diabetes` | 0.7618 ± 0.0032 | [0.7574, 0.7652] | 0.7643 ± 0.0033 | [0.7618, 0.7689] |
+| `new_dx_365d/heart_failure` | 0.7660 ± 0.0069 | [0.7562, 0.7714] | 0.7636 ± 0.0041 | [0.7584, 0.7683] |
+| `readmission_30d` | 0.6824 ± 0.0064 | [0.6738, 0.6890] | 0.6969 ± 0.0031 | [0.6926, 0.6996] |
+
+Mean AUROC across the 7 tasks: `ar` 0.7234, hybrid 0.7279 (3-seed means of
+the per-task 3-seed means above). Per task, the `ar`-vs-hybrid gap is smaller
+than at least one of the two families' own seed ranges on `inpatient_365d`,
+`new_dx_365d/ckd`, `new_dx_365d/diabetes`, and `new_dx_365d/heart_failure`;
+it exceeds both ranges on `mortality_365d`, `new_dx_365d/copd`, and
+`readmission_30d`.
+
+## Few-shot
+
+Source: [`2026-09-04-fewshot-desynpuf/`](2026-09-04-fewshot-desynpuf/), full
+table and protocol in [`results.md`](2026-09-04-fewshot-desynpuf/results.md).
+Same held-out subset, anchors, and bootstrap settings as above, `lr`/`gbm`
+plus the same six `ar`/hybrid checkpoints from grid 5, scored at few-shot
+training sizes `k=32` and `k=128` (`k` positives + `k` negatives) in addition
+to the full split. `ar`/hybrid values are the mean over the 3 training seeds
+of each checkpoint's own mean over 5 few-shot-sample seeds; `lr`'s is the
+std over its 5 few-shot-sample seeds directly (one model, no training-seed
+axis). `gbm` has no few-shot fits in the current eval path (`ehrjepa.eval.
+run.evaluate_task` only fits few-shot subsamples for `lr`/probe models) and
+is omitted from this table; its full-split numbers are in the master table
+above.
+
+| task | lr k=32 | lr k=128 | ar k=32 | ar k=128 | hybrid k=32 | hybrid k=128 |
+|---|---|---|---|---|---|---|
+| `inpatient_365d` | 0.5912 ± 0.0000 | 0.6575 ± 0.0000 | 0.6707 ± 0.0015 | 0.7058 ± 0.0045 | 0.6591 ± 0.0012 | 0.6976 ± 0.0023 |
+| `mortality_365d` | 0.5265 ± 0.0000 | 0.5332 ± 0.0000 | 0.5510 ± 0.0019 | 0.5668 ± 0.0071 | 0.5636 ± 0.0028 | 0.5942 ± 0.0037 |
+| `new_dx_365d/ckd` | 0.6320 ± 0.0000 | 0.6701 ± 0.0000 | 0.6739 ± 0.0017 | 0.7134 ± 0.0048 | 0.6758 ± 0.0020 | 0.7035 ± 0.0036 |
+| `new_dx_365d/copd` | 0.6281 ± 0.0000 | 0.6666 ± 0.0000 | 0.6840 ± 0.0042 | 0.7176 ± 0.0011 | 0.6696 ± 0.0031 | 0.7036 ± 0.0025 |
+| `new_dx_365d/diabetes` | 0.6838 ± 0.0000 | 0.7031 ± 0.0000 | 0.6940 ± 0.0051 | 0.7356 ± 0.0018 | 0.6967 ± 0.0021 | 0.7324 ± 0.0040 |
+| `new_dx_365d/heart_failure` | 0.6483 ± 0.0000 | 0.6663 ± 0.0000 | 0.6934 ± 0.0056 | 0.7227 ± 0.0050 | 0.6876 ± 0.0017 | 0.7042 ± 0.0026 |
+| `readmission_30d` | 0.5680 ± 0.0000 | 0.5880 ± 0.0000 | 0.5766 ± 0.0078 | 0.5994 ± 0.0062 | 0.6100 ± 0.0037 | 0.6487 ± 0.0009 |
+
+## Figure (few-shot)
+
+![Held-out AUROC vs. few-shot training size, one panel per task, one line per model family](../figures/fewshot_desynpuf.png)
+
+Produced by [`scripts/plot_fewshot.py`](../../scripts/plot_fewshot.py); see
+[`2026-09-04-fewshot-desynpuf/README.md`](2026-09-04-fewshot-desynpuf/README.md)
+for the full protocol.
+
 ## Caveats
 
-- **Single seed.** Every cell above is seed 0. Grid 5 (a seed sweep on a
-  subset of these cells) is training now and is not reflected here.
+- **Single seed.** Resolved for `ar` and the hybrid only: grid 5 (above)
+  gives both 3 seeds. Every other cell in the master table — every
+  masked-span JEPA, JEPA+recon, recon-only, and window variant — is still
+  seed 0.
 - **DE-SynPUF has no labs.** It is a CMS claims-derived public-use file with no
   lab results, vitals, or notes — event types available to the model are
   narrower than a typical clinical dataset, and low AUROCs are partly a
