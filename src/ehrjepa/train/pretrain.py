@@ -198,9 +198,9 @@ class Trainer:
                 )
                 self.model_config.causal = True
             self.model = LATENT_MODELS[self.kind](self.model_config).to(self.device)
-            self.objective = LatentObjective(
-                config.objective, recon_head=self.model.recon_head
-            ).to(self.device)
+            self.objective = LatentObjective(config.objective, recon_head=self.model.recon_head).to(
+                self.device
+            )
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
             self.objective = JEPAObjective(

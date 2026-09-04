@@ -233,9 +233,7 @@ def main() -> None:
     abs_scores = [c["mean_abs"] for c in cells]
     y = np.arange(len(cells))[::-1]  # top row = first (highest-gain) cell
 
-    fig, (ax_gain, ax_abs) = plt.subplots(
-        1, 2, figsize=(13, 0.34 * len(cells) + 1.6), sharey=True
-    )
+    fig, (ax_gain, ax_abs) = plt.subplots(1, 2, figsize=(13, 0.34 * len(cells) + 1.6), sharey=True)
 
     ax_gain.barh(y, gains, color=colors, edgecolor=INK, linewidth=0.5, height=0.72)
     ax_gain.axvline(0, color=MUTED, linewidth=1.0)

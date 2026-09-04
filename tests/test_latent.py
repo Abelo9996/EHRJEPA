@@ -246,9 +246,7 @@ def test_window_summary_is_the_encoder_output_just_before_the_anchor() -> None:
     anchors = torch.tensor([[6]])
     with torch.no_grad():
         out = model(batch, anchors, torch.ones(1, 1, dtype=torch.bool))
-        direct = model.window_head(
-            out.context_tokens[:, 5] + model.horizon_emb.weight[0]
-        )
+        direct = model.window_head(out.context_tokens[:, 5] + model.horizon_emb.weight[0])
     assert torch.allclose(out.predictions, direct, atol=1e-6)
 
 
