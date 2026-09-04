@@ -40,17 +40,25 @@ encoders were discarding. ``recon_value`` adds the same for the 11-way
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ehrjepa.data.masking import DEFAULT_N_ANCHORS
 from ehrjepa.models.jepa import JEPAOutput
 from ehrjepa.objectives.ar import ar_loss_chunked
 from ehrjepa.objectives.sigreg import DEFAULT_N_DIRECTIONS, SIGReg
 
-__all__ = ["JEPAObjective", "ObjectiveConfig", "collapse_diagnostics", "jepa_loss"]
+__all__ = [
+    "LATENT_KINDS",
+    "OBJECTIVE_KINDS",
+    "JEPAObjective",
+    "ObjectiveConfig",
+    "collapse_diagnostics",
+    "jepa_loss",
+]
 
 
 def jepa_loss(predictions: Tensor, targets: Tensor, beta: float = 1.0) -> Tensor:
@@ -66,16 +74,27 @@ def jepa_loss(predictions: Tensor, targets: Tensor, beta: float = 1.0) -> Tensor
     return F.smooth_l1_loss(predictions.float(), normed, beta=beta, reduction="mean")
 
 
-OBJECTIVE_KINDS = ("jepa", "ar")
+OBJECTIVE_KINDS = ("jepa", "ar", "nextlatent", "window")
+
+#: The two causal latent objectives, whose loss lives in
+#: :mod:`ehrjepa.objectives.latent` and whose models live in
+#: :mod:`ehrjepa.models.latent`. They share every field below except that
+#: ``lambda_recon`` names a different auxiliary term for each.
+LATENT_KINDS = ("nextlatent", "window")
 
 
 @dataclass
 class ObjectiveConfig:
     """Loss hyper-parameters.
 
-    ``kind`` selects the pretraining objective: ``"jepa"`` (latent prediction plus
-    SIGReg, everything below) or ``"ar"`` (next-code cross-entropy, see
-    :mod:`ehrjepa.objectives.ar`, which uses none of the other fields).
+    ``kind`` selects the pretraining objective: ``"jepa"`` (masked-span latent
+    prediction plus SIGReg, everything below), ``"ar"`` (next-code cross-entropy,
+    see :mod:`ehrjepa.objectives.ar`, which uses none of the other fields),
+    ``"nextlatent"`` (dense causal next-latent prediction) or ``"window"``
+    (pooled future-window latent prediction). The last two are described in
+    :mod:`ehrjepa.models.latent`; they read the ``lambda_*`` and ``sigreg_*``
+    fields plus their own ``horizons``/``window_horizons``/``window_anchors``,
+    and ignore the masking section entirely.
     """
 
     kind: str = "jepa"
@@ -100,9 +119,24 @@ class ObjectiveConfig:
     #: Add an 11-way ``value_bin`` head alongside it, at the same weight.
     recon_value: bool = False
 
+    #: ``nextlatent``: the step offsets predicted, one MLP head each. ``[1]`` is
+    #: "the next event"; ``[1, 4, 16]`` adds two coarser look-aheads whose losses
+    #: are averaged with it.
+    horizons: list[int] = field(default_factory=lambda: [1])
+    #: ``window``: the horizons in **days** whose events are pooled into one
+    #: target latent per anchor.
+    window_horizons: list[float] = field(default_factory=lambda: [30.0, 365.0])
+    #: ``window``: anchors drawn per window (``K``).
+    window_anchors: int = DEFAULT_N_ANCHORS
+
     def __post_init__(self) -> None:
         if self.kind not in OBJECTIVE_KINDS:
             raise ValueError(f"objective.kind must be one of {OBJECTIVE_KINDS}, got {self.kind!r}")
+        # YAML and `--override objective.horizons=[1,4,16]` both hand these over
+        # as lists already; a tuple from a hand-built config would survive to
+        # `yaml.safe_dump` in the checkpoint and fail there instead of here.
+        self.horizons = [int(k) for k in self.horizons]
+        self.window_horizons = [float(h) for h in self.window_horizons]
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> ObjectiveConfig:

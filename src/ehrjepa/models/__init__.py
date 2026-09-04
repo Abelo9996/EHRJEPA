@@ -18,6 +18,12 @@ from ehrjepa.models.ar import EHRAR, AROutput
 from ehrjepa.models.embedding import EventEmbedding
 from ehrjepa.models.encoder import Encoder, EncoderOutput
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig, JEPAOutput, ema_momentum
+from ehrjepa.models.latent import (
+    LATENT_MODELS,
+    EHRNextLatent,
+    EHRWindowLatent,
+    LatentPredictor,
+)
 from ehrjepa.models.layers import (
     FourierFeatures,
     RotaryEmbedding,
@@ -29,13 +35,17 @@ from ehrjepa.models.predictor import Predictor
 __all__ = [
     "EHRAR",
     "EHRJEPA",
+    "LATENT_MODELS",
     "EHRJEPAConfig",
+    "EHRNextLatent",
+    "EHRWindowLatent",
     "AROutput",
     "Encoder",
     "EncoderOutput",
     "EventEmbedding",
     "FourierFeatures",
     "JEPAOutput",
+    "LatentPredictor",
     "Predictor",
     "RotaryEmbedding",
     "ScalarEncoder",

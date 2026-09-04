@@ -28,7 +28,7 @@ from typing import Any
 import yaml
 
 from ehrjepa.models.jepa import EHRJEPAConfig
-from ehrjepa.objectives.loss import ObjectiveConfig
+from ehrjepa.objectives.loss import LATENT_KINDS, ObjectiveConfig
 
 __all__ = [
     "DataConfig",
@@ -165,6 +165,14 @@ class PretrainConfig:
         values["time_feature_dropout"] = self.train.time_feature_dropout
         values["recon_head"] = self.objective.lambda_recon != 0.0
         values["recon_value_head"] = values["recon_head"] and self.objective.recon_value
+        # The causal latent objectives replace the transformer predictor with
+        # their own MLP heads, and carry the horizon lists the heads are shaped
+        # from -- into the *model* config, so a checkpoint rebuilds them without
+        # the probe having to read the objective section.
+        latent = self.objective.kind in LATENT_KINDS
+        values["build_predictor"] = not latent
+        values["horizons"] = list(self.objective.horizons)
+        values["window_horizons"] = list(self.objective.window_horizons)
         return EHRJEPAConfig.from_mapping(values)
 
     def to_dict(self) -> dict[str, Any]:

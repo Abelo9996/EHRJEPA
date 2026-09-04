@@ -40,11 +40,13 @@ from torch.utils.data import DataLoader
 
 from ehrjepa.data.cache import read_meta
 from ehrjepa.data.dataset import EventSequenceDataset, collate_events
-from ehrjepa.data.masking import sample_masks
+from ehrjepa.data.masking import sample_anchors, sample_masks
 from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, JEPAOutput, ema_momentum
+from ehrjepa.models.latent import LATENT_MODELS
 from ehrjepa.objectives.ar import ARObjective
-from ehrjepa.objectives.loss import JEPAObjective, collapse_diagnostics
+from ehrjepa.objectives.latent import LatentObjective
+from ehrjepa.objectives.loss import LATENT_KINDS, JEPAObjective, collapse_diagnostics
 from ehrjepa.train.config import PretrainConfig, load_config
 from ehrjepa.utils.runtime import (
     autocast_for,
@@ -58,8 +60,9 @@ __all__ = ["LOG_COLUMNS", "Trainer", "cosine_lr", "main"]
 
 #: CSV columns, in order. TensorBoard gets the same scalars under ``train/``.
 #: A run writes every column; the ones its objective does not produce stay empty
-#: (``pred_loss``/``sigreg_*`` for ``ar``, ``ce``/``top1``/``top10`` for ``jepa``),
-#: so one reader handles both kinds of ``metrics.csv``.
+#: (``pred_loss``/``sigreg_*`` for ``ar``, ``ce``/``top1``/``top10`` for ``jepa``,
+#: ``skipped_frac``/``positives_per_anchor`` for everything but ``window``), so one
+#: reader handles every kind of ``metrics.csv``.
 LOG_COLUMNS = (
     "step",
     "loss",
@@ -82,6 +85,10 @@ LOG_COLUMNS = (
     "ema_momentum",
     "peak_memory_mb",
     "elapsed_s",
+    # Appended rather than filed next to the other loss terms: the first eleven
+    # columns are pinned by tests as the contract two readers already depend on.
+    "skipped_frac",
+    "positives_per_anchor",
 )
 
 
@@ -180,6 +187,20 @@ class Trainer:
                 self.model_config.causal = True
             self.model = EHRAR(self.model_config).to(self.device)
             self.objective: nn.Module = ARObjective(chunk=config.objective.ar_chunk).to(self.device)
+        elif self.kind in LATENT_KINDS:
+            if not self.model_config.causal:
+                # Both latent objectives take their context summary from a causal
+                # encoder's output at (or just before) the anchor; bidirectional
+                # attention would put the future being predicted into it.
+                print(
+                    f"[note] objective.kind={self.kind} implies model.causal=true; enabling it",
+                    flush=True,
+                )
+                self.model_config.causal = True
+            self.model = LATENT_MODELS[self.kind](self.model_config).to(self.device)
+            self.objective = LatentObjective(
+                config.objective, recon_head=self.model.recon_head
+            ).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
             self.objective = JEPAObjective(
@@ -314,6 +335,25 @@ class Trainer:
             output = self.model(batch)
             stats = self.objective(self.model.head, output.hidden, output.targets)
             return dict(stats), output
+        # lambda_pred == 0 means nothing pulls on the target latent, so the
+        # target pass is pure waste; skip it, for every latent objective.
+        compute_targets = self.config.objective.lambda_pred != 0.0
+        if self.kind in LATENT_KINDS:
+            if self.kind == "window":
+                anchors, anchor_mask = sample_anchors(
+                    batch["attention_mask"].cpu(),
+                    n_anchors=self.config.objective.window_anchors,
+                    generator=self.mask_generator,
+                )
+                output = self.model(
+                    batch,
+                    anchors.to(self.device),
+                    anchor_mask.to(self.device),
+                    compute_targets=compute_targets,
+                )
+            else:
+                output = self.model(batch, compute_targets=compute_targets)
+            return self.objective(output), output
         context_mask, target_mask = sample_masks(
             batch["attention_mask"].cpu(),
             p_future=self.config.masking.p_future,
@@ -322,10 +362,6 @@ class Trainer:
         )
         context_mask = context_mask.to(self.device)
         target_mask = target_mask.to(self.device)
-        # objective.lambda_pred == 0 means nothing pulls on the target latent, so
-        # the target pass (an EMA copy's full encoder forward, or a shared-weight
-        # re-embedding) is pure waste; skip it.
-        compute_targets = self.config.objective.lambda_pred != 0.0
         output = self.model(batch, context_mask, target_mask, compute_targets=compute_targets)
         losses = self.objective(output)
         return losses, output
@@ -441,8 +477,14 @@ class Trainer:
             body = "pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} sig_cls {sigreg_cls:.4f}"
             if self.config.objective.lambda_recon != 0.0:
                 body += " recon {recon_loss:.4f}"
-                if self.config.objective.recon_value:
+                if self.kind == "nextlatent":
+                    body += " top1 {top1:.3f}"
+                elif self.kind == "window":
+                    body += " pos {positives_per_anchor:.1f}"
+                elif self.config.objective.recon_value:
                     body += " recon_val {recon_value_loss:.4f}"
+            if self.kind == "window":
+                body += " skip {skipped_frac:.3f}"
         print(
             (
                 "step {step:>6} loss {loss:.4f} " + body + " rank {effective_rank:.1f} "

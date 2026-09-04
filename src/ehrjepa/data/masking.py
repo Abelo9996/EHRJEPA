@@ -22,17 +22,29 @@ Both return boolean ``(B, L)`` masks that are disjoint, never touch padding, and
 always leave at least one target -- short sequences degrade gracefully rather
 than producing an empty batch. Sampling is done on the CPU with an explicit
 :class:`torch.Generator` so a run is reproducible from its seed.
+
+:func:`sample_anchors` is the third draw in this file and belongs to the
+``window`` objective rather than to masked-span JEPA: it picks positions, not
+sets, because that objective's context is defined by a causal encoder's output at
+``a - 1`` rather than by an attention mask. It draws from the same ``[0.3L,
+0.9L]`` band and from the same kind of explicit generator.
 """
 
 from __future__ import annotations
+
+import math
 
 import torch
 from torch import Tensor
 
 __all__ = [
+    "ANCHOR_CUT_HIGH",
+    "ANCHOR_CUT_LOW",
+    "DEFAULT_N_ANCHORS",
     "DEFAULT_P_FUTURE",
     "MASK_STRATEGIES",
     "multi_block_mask",
+    "sample_anchors",
     "sample_masks",
     "future_span_mask",
 ]
@@ -41,6 +53,16 @@ MASK_STRATEGIES = ("future_span", "multi_block")
 
 #: Fraction of a batch that gets ``future_span``; the rest get ``multi_block``.
 DEFAULT_P_FUTURE = 0.6
+
+#: Where the ``window`` objective's anchors are allowed to fall, as a fraction of
+#: the sequence's valid length. The same ``[0.3L, 0.9L]`` band ``future_span``
+#: draws its cut from, and for the same reason: an anchor too early has no
+#: history to summarise, and one too late has no future left inside the window.
+ANCHOR_CUT_LOW = 0.3
+ANCHOR_CUT_HIGH = 0.9
+
+#: Anchors drawn per window by :func:`sample_anchors`.
+DEFAULT_N_ANCHORS = 8
 
 
 def _randint(low: int, high: int, generator: torch.Generator | None) -> int:
@@ -168,3 +190,41 @@ def sample_masks(
 
     device = attention_mask.device
     return context.to(device), target.to(device)
+
+
+def sample_anchors(
+    attention_mask: Tensor,
+    n_anchors: int = DEFAULT_N_ANCHORS,
+    cut_low: float = ANCHOR_CUT_LOW,
+    cut_high: float = ANCHOR_CUT_HIGH,
+    generator: torch.Generator | None = None,
+) -> tuple[Tensor, Tensor]:
+    """``(anchors, anchor_mask)``, both ``(B, n_anchors)``, for the ``window`` objective.
+
+    Each row draws ``n_anchors`` distinct positions **without replacement** from
+    ``[ceil(cut_low * L), floor(cut_high * L))``, sorted ascending, where ``L`` is
+    that row's valid length. A row whose band is narrower than ``n_anchors`` takes
+    the whole band and leaves the remaining columns invalid; ``anchor_mask`` says
+    which columns are real, so the caller never has to look at ``L`` again.
+
+    The low end is clamped to 1 because an anchor's context summary is the
+    encoder output at ``a - 1``: position 0 has no history to summarise. Drawing
+    is on the CPU from an explicit generator, like :func:`sample_masks`.
+    """
+    valid = attention_mask.bool().cpu()
+    batch, _ = valid.shape
+    anchors = torch.zeros(batch, n_anchors, dtype=torch.long)
+    mask = torch.zeros(batch, n_anchors, dtype=torch.bool)
+    for row in range(batch):
+        length = int(valid[row].sum())
+        low = max(1, math.ceil(cut_low * length))
+        high = min(length, int(cut_high * length))
+        span = high - low
+        if span <= 0:
+            continue
+        take = min(n_anchors, span)
+        picks = torch.randperm(span, generator=generator)[:take].sort().values + low
+        anchors[row, :take] = picks
+        mask[row, :take] = True
+    device = attention_mask.device
+    return anchors.to(device), mask.to(device)

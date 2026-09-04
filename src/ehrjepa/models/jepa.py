@@ -123,6 +123,20 @@ class EHRJEPAConfig:
     #: Build the auxiliary ``value_bin`` head (``objective.recon_value``).
     recon_value_head: bool = False
 
+    #: Build the transformer :class:`~ehrjepa.models.predictor.Predictor`. The
+    #: causal latent objectives in :mod:`ehrjepa.models.latent` replace it with
+    #: their own MLP heads and set this ``False``; a masked-span JEPA leaves it
+    #: alone. Guarding the construction rather than deleting it afterwards keeps
+    #: the module-initialisation order -- and therefore the RNG stream of every
+    #: existing ``jepa``/``ar`` run -- exactly as it was.
+    build_predictor: bool = True
+    #: ``objective.horizons``: the step offsets ``nextlatent`` predicts, one MLP
+    #: head each. Recorded here so a checkpoint rebuilds the same heads.
+    horizons: list[int] = field(default_factory=lambda: [1])
+    #: ``objective.window_horizons``: the horizons in days ``window`` pools over,
+    #: one learned horizon embedding row each.
+    window_horizons: list[float] = field(default_factory=lambda: [30.0, 365.0])
+
     def __post_init__(self) -> None:
         if self.target_mode not in TARGET_MODES:
             raise ValueError(f"target_mode must be one of {TARGET_MODES}, got {self.target_mode!r}")
@@ -172,20 +186,24 @@ class EHRJEPA(nn.Module):
             attn_dropout=config.attn_dropout,
             causal=config.causal,
         )
-        shared = (self.embed.age_enc, self.embed.delta_enc) if config.share_time_encoders else None
-        self.predictor = Predictor(
-            config.dim,
-            config.pred_dim,
-            config.pred_depth,
-            config.pred_heads,
-            mlp=config.mlp,
-            mlp_ratio=config.pred_mlp_ratio,
-            dropout=config.dropout,
-            attn_dropout=config.attn_dropout,
-            n_freq=config.n_freq,
-            time_encoders=shared,
-            mask_token_time=config.mask_token_time,
-        )
+        self.predictor: Predictor | None = None
+        if config.build_predictor:
+            shared = (
+                (self.embed.age_enc, self.embed.delta_enc) if config.share_time_encoders else None
+            )
+            self.predictor = Predictor(
+                config.dim,
+                config.pred_dim,
+                config.pred_depth,
+                config.pred_heads,
+                mlp=config.mlp,
+                mlp_ratio=config.pred_mlp_ratio,
+                dropout=config.dropout,
+                attn_dropout=config.attn_dropout,
+                n_freq=config.n_freq,
+                time_encoders=shared,
+                mask_token_time=config.mask_token_time,
+            )
         if config.target_mode == "ema":
             self.target_embed = copy.deepcopy(self.embed).requires_grad_(False)
             self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
@@ -323,6 +341,23 @@ class EHRJEPA(nn.Module):
         full.scatter_(1, scatter_to[:, :, None].expand(-1, -1, dim), encoded)
         return full[:, :length]
 
+    @torch.no_grad()
+    def window_targets(self, batch: Mapping[str, Tensor], tokens: Tensor) -> Tensor:
+        """Target latents for **every** position of the window, under ``no_grad``.
+
+        Which stack runs is the same decision :meth:`forward` makes for the
+        masked-span objective, minus ``target_span_only`` (which is defined by a
+        target *span*, and the causal objectives in :mod:`ehrjepa.models.latent`
+        have none): the EMA copy when there is one, a content-only re-embedding
+        when ``target.time_features`` is off, and otherwise the online tokens run
+        through the online encoder under stop-gradient.
+        """
+        if self.uses_ema or not self.config.target_time_features:
+            target_tokens = self.embed_batch(batch, target_side=True)
+            _, encoder = self._target_stack
+            return encoder(target_tokens, batch["attention_mask"]).tokens.detach()
+        return self.encoder(tokens.detach(), batch["attention_mask"]).tokens.detach()
+
     def forward(
         self,
         batch: Mapping[str, Tensor],
@@ -348,21 +383,15 @@ class EHRJEPA(nn.Module):
 
         target_repr: Tensor | None = None
         if compute_targets:
-            with torch.no_grad():
-                if self.config.target_span_only:
+            if self.config.target_span_only:
+                with torch.no_grad():
                     target_repr = self._span_targets(batch, target_mask).detach()
-                elif self.uses_ema or not self.config.target_time_features:
-                    # The shared-weight path re-embeds only when it has to: with
-                    # the time terms on, the online tokens are the same tensor.
-                    assert self.target_encoder is not None or not self.uses_ema
-                    target_tokens = self.embed_batch(batch, target_side=True)
-                    _, encoder = self._target_stack
-                    target_repr = encoder(target_tokens, batch["attention_mask"]).tokens.detach()
-                else:
-                    target_repr = self.encoder(
-                        tokens.detach(), batch["attention_mask"]
-                    ).tokens.detach()
+            else:
+                # The shared-weight path re-embeds only when it has to: with the
+                # time terms on, the online tokens are the same tensor.
+                target_repr = self.window_targets(batch, tokens)
 
+        assert self.predictor is not None, "EHRJEPA.forward needs model.build_predictor"
         predicted = self.predictor(
             context.tokens, batch["age"], batch["log_delta"], context_mask, target_mask
         )

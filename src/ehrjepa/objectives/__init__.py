@@ -15,7 +15,12 @@ utilities (embedding rank, per-dimension variance) used to detect collapse
 during training.
 """
 
-from ehrjepa.data.masking import future_span_mask, multi_block_mask, sample_masks
+from ehrjepa.data.masking import (
+    future_span_mask,
+    multi_block_mask,
+    sample_anchors,
+    sample_masks,
+)
 from ehrjepa.objectives.ar import (
     ARObjective,
     ARStats,
@@ -24,7 +29,9 @@ from ehrjepa.objectives.ar import (
     ar_loss_chunked,
     next_code_targets,
 )
+from ehrjepa.objectives.latent import LatentObjective, multilabel_bce_chunked
 from ehrjepa.objectives.loss import (
+    LATENT_KINDS,
     OBJECTIVE_KINDS,
     JEPAObjective,
     ObjectiveConfig,
@@ -34,10 +41,12 @@ from ehrjepa.objectives.loss import (
 from ehrjepa.objectives.sigreg import SIGReg, epps_pulley, random_directions, sigreg
 
 __all__ = [
+    "LATENT_KINDS",
     "OBJECTIVE_KINDS",
     "ARObjective",
     "ARStats",
     "JEPAObjective",
+    "LatentObjective",
     "ObjectiveConfig",
     "NextCodeHead",
     "SIGReg",
@@ -48,8 +57,10 @@ __all__ = [
     "future_span_mask",
     "jepa_loss",
     "multi_block_mask",
+    "multilabel_bce_chunked",
     "next_code_targets",
     "random_directions",
+    "sample_anchors",
     "sample_masks",
     "sigreg",
 ]

@@ -55,6 +55,7 @@ from ehrjepa.eval.baselines import LOGISTIC_GRID, FittedModel, fit_logistic
 from ehrjepa.eval.history import HistoryReader, anchor_minutes
 from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig
+from ehrjepa.models.latent import LATENT_MODELS
 
 __all__ = [
     "AUTO_FEATURES",
@@ -127,7 +128,7 @@ def load_encoder(
     weights, which is the control arm. ``checkpoint=None`` requires
     ``vocab_size`` and builds a default-shaped model, which only the tests use.
     """
-    kind = "jepa"
+    kind: str = "jepa"
     if checkpoint is None:
         if vocab_size is None:
             raise ValueError("vocab_size is required when no checkpoint is given")
@@ -140,7 +141,11 @@ def load_encoder(
         kind = str(payload["config"].get("objective", {}).get("kind", "jepa"))
         state = payload["model"]
     torch.manual_seed(seed)
-    model: EHRJEPA | EHRAR = EHRAR(config) if kind == "ar" else EHRJEPA(config)
+    # Which class the checkpoint's objective implies. Everything a probe touches
+    # -- ``embed_batch``, ``encoder`` -- is common to all four, but the heads and
+    # the predictor are not, and ``load_state_dict`` is strict.
+    builder = {"ar": EHRAR, **LATENT_MODELS}.get(kind, EHRJEPA)
+    model: EHRJEPA | EHRAR = builder(config)
     if state is not None and not random_init:
         model.load_state_dict(state)
     return model.eval().float(), max_len
