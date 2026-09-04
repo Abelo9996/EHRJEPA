@@ -1,0 +1,45 @@
+# Pipeline test for the third pilot grid, not an experiment.
+#
+# One run of 50 steps through the whole path grid 3 takes, exercising the new
+# `objective.lambda_pred: 0` flag specifically: with mask_token_time also off,
+# this is grid 3's `recon_only_notime` cell at 1.7% of its budget, which
+# combines the two paths worth smoke-testing at scale rather than in a unit
+# test -- the target-encoder-forward skip (`EHRJEPA.forward`'s
+# `compute_targets=False`, wired from `lambda_pred == 0` in
+# `ehrjepa.train.pretrain.Trainer._forward`) running under `target_mode: ema`,
+# so the EMA modules exist but are never called or updated, and the chunked
+# reconstruction cross-entropy carrying the only gradient into the predictor.
+#
+# 50 steps is 819,200 nominal token slots, 1.7% of a grid-3 cell's budget.
+# **The AUROCs are what a barely-initialised encoder scores.** Nothing about
+# them is interpretable; this run exists to prove the runner, the model and the
+# eval harness go end to end on this commit before grid 3 is launched for real.
+
+name: 2026-09-04-microgrid3
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 819200          # 50 x 64 x 256
+seed: 0
+
+# The same held-out cut, seed and resample count as every other number here.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+control_runs: [micro3_lambda_pred0]
+
+runs:
+  - name: micro3_lambda_pred0
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_pred: 0
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      predictor.mask_token_time: false

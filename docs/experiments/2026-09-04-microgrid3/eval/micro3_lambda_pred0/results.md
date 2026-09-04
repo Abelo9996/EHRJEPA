@@ -1,0 +1,93 @@
+# Downstream evaluation -- desynpuf-s1
+
+Metrics are on the `held_out` split. Intervals are percentile bootstrap over subjects, 200 resamples, 95%.
+
+|  |  |
+|---|---|
+| source | `desynpuf-s1` |
+| MEDS | `data/meds/desynpuf-s1` |
+| cache | `data/cache/desynpuf-s1` |
+| tasks | `data/tasks/desynpuf-s1` |
+| anchor seed | 20260903 |
+| commit | `4685f09` |
+| created | 2026-09-04T04:30:47+00:00 |
+| runtime (s) | 675.3 |
+
+## Models
+
+| model | kind | checkpoint | features |
+|---|---|---|---|
+| `random_init` | probe | `/Users/abelyagubyan/Downloads/EHRJEPA/.worktrees/task/ehrjepa-47c80f/runs/2026-09-04-microgrid3/micro3_lambda_pred0/final.pt` | mean@final |
+| `ckpt:micro3_lambda_pred0` | probe | `/Users/abelyagubyan/Downloads/EHRJEPA/.worktrees/task/ehrjepa-47c80f/runs/2026-09-04-microgrid3/micro3_lambda_pred0/final.pt` | mean@final |
+
+## Cohorts
+
+| task | train n (rate) | tuning n (rate) | held_out n (rate) | note |
+|---|---|---|---|---|
+| `mortality_365d` | 58192 (0.0189) | 7285 (0.0177) | 3000 (0.0220) |  |
+| `inpatient_365d` | 58192 (0.2065) | 7285 (0.2091) | 3000 (0.2010) |  |
+| `readmission_30d` | 24417 (0.0572) | 3059 (0.0588) | 3000 (0.0493) |  |
+| `new_dx_365d/diabetes` | 39458 (0.2262) | 4896 (0.2220) | 3000 (0.2240) |  |
+| `new_dx_365d/heart_failure` | 48770 (0.1270) | 6090 (0.1251) | 3000 (0.1370) |  |
+| `new_dx_365d/ckd` | 51106 (0.0933) | 6406 (0.0894) | 3000 (0.0970) |  |
+| `new_dx_365d/copd` | 48015 (0.1323) | 5975 (0.1279) | 3000 (0.1303) |  |
+
+## AUROC
+
+| task | random_init | ckpt:micro3_lambda_pred0 |
+|---|---|---|
+| `mortality_365d` | 0.570 [0.493, 0.635] | 0.576 [0.498, 0.643] |
+| `inpatient_365d` | 0.677 [0.652, 0.698] | 0.676 [0.650, 0.696] |
+| `readmission_30d` | 0.662 [0.608, 0.706] | 0.649 [0.595, 0.693] |
+| `new_dx_365d/diabetes` | 0.725 [0.705, 0.746] | 0.723 [0.702, 0.743] |
+| `new_dx_365d/heart_failure` | 0.688 [0.664, 0.718] | 0.687 [0.660, 0.716] |
+| `new_dx_365d/ckd` | 0.696 [0.667, 0.724] | 0.689 [0.662, 0.715] |
+| `new_dx_365d/copd` | 0.696 [0.672, 0.719] | 0.695 [0.669, 0.718] |
+
+## AUPRC
+
+| task | random_init | ckpt:micro3_lambda_pred0 |
+|---|---|---|
+| `mortality_365d` | 0.027 [0.019, 0.039] | 0.028 [0.020, 0.041] |
+| `inpatient_365d` | 0.330 [0.297, 0.367] | 0.325 [0.293, 0.360] |
+| `readmission_30d` | 0.085 [0.066, 0.110] | 0.085 [0.067, 0.112] |
+| `new_dx_365d/diabetes` | 0.392 [0.363, 0.430] | 0.385 [0.354, 0.420] |
+| `new_dx_365d/heart_failure` | 0.241 [0.213, 0.280] | 0.233 [0.205, 0.268] |
+| `new_dx_365d/ckd` | 0.180 [0.153, 0.221] | 0.174 [0.146, 0.208] |
+| `new_dx_365d/copd` | 0.229 [0.204, 0.265] | 0.226 [0.200, 0.260] |
+
+## BRIER
+
+| task | random_init | ckpt:micro3_lambda_pred0 |
+|---|---|---|
+| `mortality_365d` | 0.0215 [0.0173, 0.0266] | 0.0215 [0.0173, 0.0266] |
+| `inpatient_365d` | 0.1505 [0.1438, 0.1588] | 0.1508 [0.1439, 0.1592] |
+| `readmission_30d` | 0.0468 [0.0409, 0.0524] | 0.0465 [0.0405, 0.0523] |
+| `new_dx_365d/diabetes` | 0.1556 [0.1490, 0.1628] | 0.1559 [0.1494, 0.1632] |
+| `new_dx_365d/heart_failure` | 0.1123 [0.1029, 0.1194] | 0.1127 [0.1035, 0.1200] |
+| `new_dx_365d/ckd` | 0.0840 [0.0757, 0.0912] | 0.0843 [0.0760, 0.0918] |
+| `new_dx_365d/copd` | 0.1077 [0.0993, 0.1164] | 0.1077 [0.0997, 0.1163] |
+
+## CALIBRATION SLOPE
+
+| task | random_init | ckpt:micro3_lambda_pred0 |
+|---|---|---|
+| `mortality_365d` | 0.537 [0.025, 1.036] | 0.626 [0.071, 1.166] |
+| `inpatient_365d` | 1.045 [0.883, 1.213] | 1.006 [0.851, 1.171] |
+| `readmission_30d` | 0.773 [0.508, 1.016] | 0.881 [0.545, 1.175] |
+| `new_dx_365d/diabetes` | 0.932 [0.816, 1.063] | 0.948 [0.833, 1.080] |
+| `new_dx_365d/heart_failure` | 0.869 [0.756, 1.032] | 0.837 [0.719, 0.990] |
+| `new_dx_365d/ckd` | 0.988 [0.807, 1.168] | 1.095 [0.897, 1.287] |
+| `new_dx_365d/copd` | 0.924 [0.777, 1.075] | 0.919 [0.766, 1.076] |
+
+## Paired bootstrap (AUROC difference, identical subjects)
+
+| task | comparison | diff | 95% CI | boot p |
+|---|---|---|---|---|
+| `mortality_365d` | `random_init` - `ckpt:micro3_lambda_pred0` | -0.006 | [-0.024, 0.011] | 0.410 |
+| `inpatient_365d` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.002 | [-0.004, 0.007] | 0.490 |
+| `readmission_30d` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.013 | [-0.004, 0.029] | 0.110 |
+| `new_dx_365d/diabetes` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.002 | [-0.002, 0.008] | 0.310 |
+| `new_dx_365d/heart_failure` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.001 | [-0.004, 0.008] | 0.580 |
+| `new_dx_365d/ckd` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.007 | [-0.003, 0.017] | 0.200 |
+| `new_dx_365d/copd` | `random_init` - `ckpt:micro3_lambda_pred0` | 0.001 | [-0.006, 0.008] | 0.820 |
