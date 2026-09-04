@@ -1,0 +1,111 @@
+# Phase 5e: seed-to-seed spread. Grids 1-4 report one seed per cell -- every
+# number in those tables is one draw, and a claim like "AR beats the hybrid by
+# 2 points" has no meaning until we know whether 2 points is inside or outside
+# what re-running the *same* cell at a different seed moves. This grid trains
+# grid 1's `ar` and grid 4's `nextlatent_h1416_recon` (the two most-quoted
+# cells so far) at two more seeds each, at the same budget, and reports nothing
+# but the four AUROC numbers per task -- the spread across seeds 0/1/2 is read
+# from this table plus grids 1 and 4, not computed here.
+#
+# `run.seed` is the one override that changes between a `_s1` and `_s2` cell.
+# It is read once, in `Trainer.__init__`, by `seed_everything(run.seed)` --
+# *before* the model is constructed -- so the same override seeds Python/NumPy/
+# torch's global RNG (which the model's weight init draws from) and the
+# training-time streams (`mask_generator`/`diag_generator`/the dataloader are
+# `run.seed + {1,2,3}`) in one shot. There is no separate "model init seed" to
+# set.
+#
+# Grid-level `seed: 0` is untouched and does something different: it is the
+# `--seed` `scripts/ablate.py` hands to `ehrjepa.eval.run` for every cell in
+# this file, which is the bootstrap-CI and probe/lr/gbm-fit seed *and* the
+# `torch.manual_seed` a `random_init` control uses before copying a cell's
+# architecture (`load_encoder`, `probe.py`). Held fixed across all four rows,
+# it makes the eval side of every row identical regardless of which seed
+# trained the checkpoint -- the four rows differ from each other only in what
+# `run.seed` did during training.
+#
+# Held-out subject subset and anchors: `eval_subject_seed` (below, 0, same
+# grid-level field as grids 1-4) is the only knob on the subject draw, and it
+# is one value for the whole grid, so all four cells score the same 3,000
+# subjects. The anchor draw within a subject's window is `tasks.ANCHOR_SEED`,
+# a module constant (20260903) that no CLI flag or grid field reaches -- it is
+# identical across every row of every grid this repo has run, not just this
+# one, which is a stronger guarantee than restating it here would be.
+#
+# random_init control: `control_name` keys the cache as `<model>@<run>`, but
+# the *value* that lands there never depends on which seed trained the cell
+# whose architecture it copies -- `load_encoder` seeds the untrained weights
+# from the eval `--seed` (grid-level, fixed at 0 above), not from that cell's
+# `run.seed`. Architecture is what varies the control, and `ar_s1`/`ar_s2`
+# share one (4x192 causal, tied embeddings, no recon head) while
+# `hybrid_s1`/`hybrid_s2` share the other (same stack plus the tied recon
+# head `lambda_recon: 0.1` builds). So this grid computes exactly two
+# controls -- `random_init@ar_s1` and `random_init@hybrid_s1` -- and
+# `ar_s2`/`hybrid_s2` are scored against those: recomputing per seed would
+# just repeat the same `torch.manual_seed(0)` draw of the same shape, which is
+# not a second control, it is the first one under a different name. This is
+# "reuse the seed-0 control because the runner keys controls by architecture,
+# not by training seed," the second option the runner supports.
+
+name: 2026-09-04-pilot5-seeds-desynpuf
+base: configs/pretrain_pilot.yaml
+source: desynpuf-s1
+budget_tokens: 48000000
+seed: 0
+
+# Identical to grids 1-4 and to the phase-4 evaluation: same held-out subset,
+# same bootstrap count, same probe protocol. `probe_features: auto` resolves
+# to `last@final` for every cell here -- both architectures are causal.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One control per architecture, computed off the first seed each architecture
+# appears at; see the note above for why a per-seed control would not be a
+# different control.
+control_runs: [ar_s1, hybrid_s1]
+
+runs:
+  # Grid 1's `ar` cell, seeds 1 and 2. Overrides identical to
+  # configs/grids/pilot_desynpuf.yaml's `ar` run.
+  - name: ar_s1
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      run.seed: 1
+
+  # Grid 4's `nextlatent_h1416_recon` cell, seeds 1 and 2. Overrides identical
+  # to configs/grids/pilot4_desynpuf.yaml's cell (3).
+  - name: hybrid_s1
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1
+      run.seed: 1
+
+  - name: ar_s2
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      run.seed: 2
+
+  - name: hybrid_s2
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_sigreg: 0.05
+      objective.lambda_recon: 0.1
+      run.seed: 2
