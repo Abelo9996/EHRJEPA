@@ -1,0 +1,83 @@
+# RTX 4070 scale-up grid, not yet run. Four cells at 500M nominal token slots
+# each (~10x the 48M-token pilot budget of grids 1-4), on
+# configs/pretrain_scale.yaml's 6-layer/256-wide encoder rather than the
+# pilot's 4x192 one. See docs/CUDA_SETUP.md for how to launch this.
+#
+# The four cells are the pilot grids' headline rows, carried forward rather
+# than re-derived:
+#
+#   ar          next-code cross-entropy, causal. Grid 1's reference cell and,
+#               at 48M tokens, the largest gain over its own random_init
+#               control of any single-objective cell (+0.0445 mean AUROC).
+#   hybrid      dense causal next-latent prediction at horizons [1, 4, 16]
+#               plus the AR next-code loss through the same tied head
+#               (lambda_recon 0.1). Grid 4's `nextlatent_h1416_recon`: the
+#               single highest-gain, highest-absolute-AUROC cell across all
+#               four pilot grids (+0.0923, mean AUROC 0.7287).
+#   recon_only  masked-span objective with the latent smooth-L1 term dropped
+#               (lambda_pred 0) and code reconstruction as the only signal
+#               (lambda_recon 0.1). Grid 3's finding was that this scores
+#               within 0.004 AUROC of the same config with the latent term
+#               left on -- carried forward to see whether that holds at 10x
+#               the tokens and a larger encoder.
+#   jepa_ema    the original masked-span latent JEPA (EMA target, SIGReg 0.05,
+#               60/40 future/block masking) -- grid 1's `jepa_ema`, included as
+#               the objective this whole ablation line started from, even
+#               though it did not beat its control at the pilot budget.
+#
+# See docs/experiments/PILOT_RESULTS.md for the grids 1-4 numbers these four
+# cells are read against.
+
+name: scale-desynpuf
+base: configs/pretrain_scale.yaml
+source: desynpuf-s1
+budget_tokens: 500000000
+seed: 0
+
+# Same eval subset and bootstrap budget as the pilot grids, so a number here
+# lands in the same frame as docs/experiments/PILOT_RESULTS.md.
+bootstrap: 200
+eval_subject_limit: 3000
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: docs/experiments/2026-09-03-eval-desynpuf/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One untrained control per architecture: `ar` and `hybrid` are both causal
+# (last@final pooling), `recon_only` and `jepa_ema` are both bidirectional
+# (mean@final) -- same reasoning as grids 1-4's control_runs.
+control_runs: [ar, jepa_ema]
+
+runs:
+  - name: ar
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+
+  - name: hybrid
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+
+  - name: recon_only
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_pred: 0
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      predictor.mask_token_time: true
+
+  - name: jepa_ema
+    overrides:
+      objective.kind: jepa
+      model.target_mode: ema
+      objective.lambda_sigreg: 0.05

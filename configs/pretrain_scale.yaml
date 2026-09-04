@@ -1,0 +1,101 @@
+# Scale-up config for CUDA hardware: 6-layer / 256-wide encoder, 4-layer /
+# 128-wide predictor -- same shape as configs/pretrain_small.yaml, sized for
+# an RTX 4070 (12 GB VRAM) rather than the 16 GB Apple M4 the rest of this
+# repository's numbers were measured on. See docs/CUDA_SETUP.md for how to
+# build the cache and launch a grid against this config, and
+# configs/grids/scale_desynpuf.yaml for the 500M-token grid that uses it.
+#
+# Expected memory: under 12 GB, estimated (not measured on CUDA -- there is
+# no CUDA hardware in this repository's history). Basis:
+# docs/experiments/2026-09-03-pilot-desynpuf/README.md's throughput table,
+# row "6x256, max_len 512, batch 32, jepa, bf16" -> 9,375 MB peak, measured
+# on Apple M4/MPS. Two adjustments from that number to this config's batch 64:
+#
+#   1. Trainable parameters at this shape are small next to activations (the
+#      pilot's 4x192 JEPA cell is 7.96M trainable, 74% of it one embedding
+#      table; this 6x256 shape scales to roughly 13-14M) -- optimizer state
+#      adds well under 1 GB, so peak memory here is activation-dominated and
+#      should scale close to linearly with batch size: naive doubling of
+#      9,375 MB for batch 64 would land near 18-19 GB.
+#   2. That naive doubling assumes bf16 saves nothing, which is what the pilot
+#      table shows *on MPS* (9,375 MB at bf16 vs. 10,367 MB at fp32 for the
+#      same shape -- about 10%, not the ~50% activation-memory halving real
+#      bf16 tensor-core storage gives on CUDA). If CUDA's bf16 autocast
+#      actually halves activation bytes the way it does on typical NVIDIA
+#      hardware, batch 64 at true bf16 lands close to the batch-32 MPS fp32
+#      figure, i.e. roughly 9-11 GB -- under budget, but only barely, and this
+#      is an extrapolation across both a batch-size change and a hardware
+#      backend a number was never measured on.
+#
+# Verify before a long run: `python scripts/throughput.py --only
+# scale/jepa/bf16 ...` (or a 50-step manual run with this config) on the
+# actual card, and fall back to `optim.accum_steps: 2` with `run.batch_size:
+# 32` (same effective batch, half the activation memory) if it does not fit.
+
+data:
+  cache_dir: data/cache/desynpuf-s1
+  split: train
+  max_len: 512
+  min_len: 16
+  sampling: random_window
+  num_workers: 0
+
+model:
+  dim: 256
+  depth: 6
+  heads: 4                # head_dim 64
+  mlp: swiglu
+  mlp_ratio: 4.0
+  dropout: 0.1
+  attn_dropout: 0.0
+  n_freq: 16
+  pred_dim: 128
+  pred_depth: 4
+  pred_heads: 4
+  target_mode: ema         # "shared" (LeJEPA) or "ema" (V-JEPA 2)
+  ema_start: 0.996
+  ema_end: 1.0
+  causal: false             # the `ar` cell overrides this
+  tie_embeddings: true
+
+objective:
+  kind: jepa               # "jepa", "ar", "nextlatent" or "window"
+  lambda_sigreg: 0.05       # LeJEPA's reported robust default
+  smooth_l1_beta: 1.0
+  sigreg_directions: 256
+  sigreg_max_rows: 8192
+  sigreg_grid: 17           # the paper's grid: 17 trapezoid points on [-5, 5]
+  sigreg_t_max: 5.0
+  sigreg_sigma: 1.0
+
+masking:
+  p_future: 0.6
+  future_min_span: 8
+  future_max_span: 64
+  future_cut_low: 0.3
+  future_cut_high: 0.9
+  block_min_blocks: 2
+  block_max_blocks: 4
+  block_block_low: 0.05
+  block_block_high: 0.15
+  block_context_drop: 0.3
+
+optim:
+  lr: 3.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  warmup_steps: 100
+  min_lr_ratio: 0.01
+  grad_clip: 1.0
+  accum_steps: 1
+
+run:
+  steps: 2000               # placeholder for standalone use; a grid sets this
+  batch_size: 64
+  seed: 0
+  device: auto               # resolves to cuda first (utils.runtime.resolve_device)
+  precision: bf16
+  out_dir: runs/pretrain_scale
+  log_every: 25
+  ckpt_every: 2000
+  tensorboard: true
