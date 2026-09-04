@@ -50,7 +50,6 @@ in ``extras`` and are logged as ``skipped_frac``.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 
 import torch
@@ -267,8 +266,12 @@ class EHRWindowLatent(_CausalLatent):
         targets = self.window_targets(batch, tokens) if compute_targets else None
 
         dim = hidden.shape[-1]
-        times = batch["time_min"].to(torch.float32)  # (B, L)
-        last_time = torch.where(valid, times, torch.full_like(times, -math.inf)).max(dim=1).values
+        # int64 throughout: ``time_min`` is minutes since epoch, which passes
+        # 2^24 in 2001, so float32 cannot represent every value and "strictly
+        # after the anchor" would silently include or drop events a minute apart.
+        times = batch["time_min"].to(torch.int64)  # (B, L)
+        floor = torch.full_like(times, torch.iinfo(torch.int64).min)
+        last_time = torch.where(valid, times, floor).max(dim=1).values
         anchor_mask = anchor_mask.bool() & (anchors >= 1)
         index = (anchors - 1).clamp(min=0)
         summary = hidden.gather(1, index[:, :, None].expand(-1, -1, dim))  # (B, K, dim)
@@ -282,7 +285,7 @@ class EHRWindowLatent(_CausalLatent):
         cols: list[Tensor] = []
         offered = unobserved = empty = 0
         for slot, days in enumerate(self.config.window_horizons):
-            end = anchor_time + days * MINUTES_PER_DAY
+            end = anchor_time + round(days * MINUTES_PER_DAY)
             inside = (
                 valid[:, None, :]
                 & (times[:, None, :] > anchor_time[:, :, None])
