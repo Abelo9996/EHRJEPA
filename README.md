@@ -99,7 +99,9 @@ cache and vocabulary are fit only on the `train` split and then reused for
 (0.6776–0.6901) sit within 0.008 of their shared `random_init@jepa_ema`
 control (0.6821). Grids 2–4 (20 trained cells total) are consolidated in
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md); grid
-5 (a seed sweep) is training now.*
+5 reseeds `ar` and the hybrid at 2 more seeds each (3 total), and a follow-up
+run adds few-shot AUROC (k=32, 128, all) for `lr`, `gbm`, `ar`, and the
+hybrid.*
 
 **Current findings** (from
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the
@@ -126,8 +128,18 @@ resamples, seed 0):
   cells in grids 1-4.
 - The count-feature baselines score mean AUROC 0.7261 (`gbm`) and 0.6949
   (`lr`) across the same tasks.
-- Every cell above is seed 0; a seed sweep (grid 5) is training now and is not
-  reflected in these numbers.
+- Every cell above is seed 0, except `ar` and the hybrid (see below).
+- Grid 5 reseeds `ar` (grid 1) and the hybrid (`nextlatent_h1416_recon`,
+  grid 4) at 2 more seeds each. 3-seed mean AUROC across the 7 tasks: `ar`
+  0.7234 (range across tasks of the per-task 3-seed std: 0.0009-0.0069),
+  hybrid 0.7279 (0.0018-0.0109). Per-task detail in
+  [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md#grid-5-seeds).
+- Few-shot AUROC (k=32 / k=128 / all, mean over 3 training seeds for `ar`/
+  hybrid, over 5 few-shot seeds for `lr`) averaged across the 7 tasks: `lr`
+  0.6111 / 0.6407 / 0.6949; `ar` 0.6491 / 0.6802 / 0.7234; hybrid 0.6518 /
+  0.6835 / 0.7279 (`gbm` has no few-shot fits in the current eval path; its
+  full-split number is the 0.7261 above). Full table and protocol in
+  [`docs/experiments/2026-09-04-fewshot-desynpuf/`](docs/experiments/2026-09-04-fewshot-desynpuf/).
 
 ## Quickstart
 
