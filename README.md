@@ -95,25 +95,39 @@ cache and vocabulary are fit only on the `train` split and then reused for
 </p>
 
 *At this 48M-token budget, `ar` beats its untrained `random_init@ar` control on
-6 of 7 tasks (mean AUROC 0.721 vs. 0.676); each `jepa_*` variant's mean AUROC
-(0.681–0.690) sits within 0.01 of its `random_init@jepa_ema` control (0.682).
-Grid 2 (content-only targets) is in progress.*
+6 of 7 tasks (mean AUROC 0.7205 vs. 0.6760); grid 1's `jepa_*` variants
+(0.6776–0.6901) sit within 0.008 of their shared `random_init@jepa_ema`
+control (0.6821). Grids 2–4 (20 trained cells total) are consolidated in
+[`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md); grid
+5 (a seed sweep) is training now.*
 
 **Current findings** (from
-[`docs/experiments/2026-09-03-pilot-desynpuf/summary.md`](docs/experiments/2026-09-03-pilot-desynpuf/summary.md),
-2,930 steps / 48,005,120 tokens per run, 3,000 held-out DE-SynPUF subjects, 200
-bootstrap resamples, `cls_mean@final` probe):
+[`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the
+consolidated table for grids 1-4: 20 trained cells, 2,930 steps /
+48,005,120 tokens each, 3,000 held-out DE-SynPUF subjects, 200 bootstrap
+resamples, seed 0):
 
-- `ar` scores 0.606–0.759 AUROC across the 7 tasks (mean 0.721); its untrained
-  `random_init@ar` control scores 0.616–0.721 (mean 0.676).
-- `jepa_ema`, `jepa_ema_nosig`, and `jepa_shared_sig` score 0.609–0.742,
-  0.641–0.738, and 0.629–0.729 AUROC respectively (means 0.683, 0.690, 0.682);
-  their shared `random_init@jepa_ema` control scores 0.602–0.726 (mean 0.682).
-- The count-feature baselines score 0.572–0.789 (`gbm`, mean 0.726) and
-  0.554–0.744 (`lr`, mean 0.695) across the same tasks.
-- All four pretraining runs (`ar`, `jepa_ema`, `jepa_ema_nosig`,
-  `jepa_shared_sig`) were trained to the same token budget so the comparison is
-  matched.
+- `ar` scores mean AUROC 0.7205 across the 7 tasks, +0.0445 over its own
+  `random_init@ar` control (0.6760).
+- Grid 1's five masked-span JEPA variants (target, SIGReg, and masking-mix
+  swept one at a time off `jepa_ema`) score mean AUROC 0.6776-0.6901 against
+  one shared `random_init@jepa_ema` control (0.6821): gain -0.0046 to +0.0080.
+- Grid 2's five cells (closing a time-conditional-prior shortcut, a
+  context-copy shortcut, or both, with and without an auxiliary code-recon
+  term) score mean AUROC 0.6750-0.6999 against `random_init@jepa_notime`
+  (0.6736): gain +0.0014 to +0.0263.
+- Grid 3's four cells isolate the code-reconstruction term from the latent
+  smooth-L1 term: `recon_only` (no latent term) scores 0.6990, 0.0041 AUROC
+  below `jepa_recon_notime` (latent term + recon + notime, 0.7031).
+- Grid 4's `nextlatent_h1416_recon` (dense causal next-latent prediction at
+  horizons [1,4,16] plus the AR next-code loss through the same tied head)
+  scores mean AUROC 0.7287, +0.0923 over its `random_init@nextlatent_h1`
+  control (0.6364) — the highest gain and highest mean AUROC of all 20 trained
+  cells in grids 1-4.
+- The count-feature baselines score mean AUROC 0.7261 (`gbm`) and 0.6949
+  (`lr`) across the same tasks.
+- Every cell above is seed 0; a seed sweep (grid 5) is training now and is not
+  reflected in these numbers.
 
 ## Quickstart
 
@@ -179,8 +193,7 @@ through the same, but untrained, architecture as its control.*
 
 ## Roadmap
 
-- Grid 2: content-only targets (`target.time_features: false`), following up
-  on the JEPA models in grid 1.
+- Grid 5: a seed sweep on a subset of grids 1-4's cells (training now).
 - Scale up on an RTX 4070 with the full MIMIC-IV v3.1 extract.
 - Evaluate against the EHRSHOT task suite and MEDS-DEV.
 - Release: pretrained weights, benchmark numbers, and a citable preprint.
