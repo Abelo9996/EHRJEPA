@@ -400,9 +400,19 @@ def _spawn(command: Sequence[str], log: Log) -> None:
         raise RuntimeError(f"command failed with code {proc.returncode}: {command[:4]}")
 
 
-def train_one(grid: Grid, entry: Mapping[str, Any], log: Log) -> dict:
-    """Train one cell to its budget and return its last logged metrics row."""
+def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = False) -> dict:
+    """Train one cell to its budget and return its last logged metrics row.
+
+    If the cell already has a ``final.pt`` and ``metrics.csv`` (a previous grid
+    attempt trained it but failed later, e.g. in eval), training is skipped and
+    those artifacts are reused unless ``force`` is set.
+    """
     out_dir = Path(entry["out_dir"])
+    if not force and (out_dir / "final.pt").exists() and (out_dir / "metrics.csv").exists():
+        log.say(f"reusing trained checkpoint for {entry['run']} at {out_dir / 'final.pt'}")
+        final = _final_metrics(out_dir)
+        final["wall_s"] = 0.0
+        return final
     overrides = [f"{k}={_scalar(v)}" for k, v in entry["overrides"].items()]
     started = time.perf_counter()
     _spawn(
@@ -575,7 +585,7 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
                     f"start {entry['run']}: {entry['steps']} steps x "
                     f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:,} tokens"
                 )
-                final = train_one(grid, entry, log)
+                final = train_one(grid, entry, log, force=force)
                 log.say(f"trained {entry['run']} in {final['wall_s']:.0f}s")
             have = baselines_for(grid)
             controls_needed = entry["run"] in grid.control_runs and not all(

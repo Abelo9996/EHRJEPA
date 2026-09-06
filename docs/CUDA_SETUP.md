@@ -36,7 +36,7 @@ no GPU, or the driver on this box needs a specific CUDA toolkit version,
 reinstall torch from PyTorch's own index for that version instead:
 
 ```bash
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,eval]"
 
 # If the verify step below finds no GPU, pin to a specific CUDA build --
 # match the version to `nvidia-smi`'s reported CUDA version, e.g. cu124:
