@@ -1,8 +1,8 @@
-# CUDA setup: RTX 4070, Linux
+# CUDA setup: RTX 4060, Linux
 
 Everything in this repository so far — grids 1-4, the sanity runs, the
 throughput table — was measured on an Apple M4 over MPS. This is the setup
-procedure for a 12 GB RTX 4070 on Linux, written and checked (config parsing,
+procedure for an 8 GB RTX 4060 on Linux, written and checked (config parsing,
 `--dry-run` grid planning) without CUDA hardware in the loop. Nothing here has
 been trained.
 
@@ -126,7 +126,7 @@ uv run python -m ehrjepa.train.pretrain --config configs/pretrain_scale.yaml \
                 run.out_dir=runs/scale-throughput-check
 ```
 
-If `configs/pretrain_scale.yaml` does not fit in 12 GB at `batch_size: 64`,
+If `configs/pretrain_scale.yaml` does not fit in 8 GB at `batch_size: 64`,
 fall back to `optim.accum_steps: 2` with `run.batch_size: 32` (same effective
 batch, half the activation memory) via `--override` on the grid's `base`
 config or by editing the file directly.

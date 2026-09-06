@@ -1,6 +1,6 @@
 # Scale-up config for CUDA hardware: 6-layer / 256-wide encoder, 4-layer /
 # 128-wide predictor -- same shape as configs/pretrain_small.yaml, sized for
-# an RTX 4070 (12 GB VRAM) rather than the 16 GB Apple M4 the rest of this
+# an RTX 4060 (8 GB VRAM) rather than the 16 GB Apple M4 the rest of this
 # repository's numbers were measured on. See docs/CUDA_SETUP.md for how to
 # build the cache and launch a grid against this config, and
 # configs/grids/scale_desynpuf.yaml for the 500M-token grid that uses it.

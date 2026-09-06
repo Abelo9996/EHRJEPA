@@ -1,4 +1,4 @@
-# RTX 4070 scale-up grid, not yet run. Four cells at 500M nominal token slots
+# RTX 4060 scale-up grid, not yet run. Four cells at 500M nominal token slots
 # each (~20x the 48M-token pilot budget; ar and hybrid only, about 8.5 h per cell on an RTX 4060 at ~33k tok/s), on
 # configs/pretrain_scale.yaml's 6-layer/256-wide encoder rather than the
 # pilot's 4x192 one. See docs/CUDA_SETUP.md for how to launch this.

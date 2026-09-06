@@ -104,10 +104,30 @@ run adds few-shot AUROC (k=32, 128, all) for `lr`, `gbm`, `ar`, and the
 hybrid.*
 
 **Current findings** (from
+[`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md),
+`ar` and the `nextlatent`+recon hybrid (`hybrid`) at 200M and 1B nominal
+token slots, 6L/256d encoder, RTX 4060, same 3,000 held-out DE-SynPUF
+subjects, 200 bootstrap resamples, and 7 tasks as the pilot grids below,
+seed 0):
+
+- `ar` mean AUROC: 0.7205 (48M tokens) → 0.7304 (200M) → 0.7237 (1B) — does
+  not improve from 200M to 1B and drops on 4 of 7 tasks over that step
+  (`new_dx_365d/copd`, `new_dx_365d/diabetes`, `new_dx_365d/heart_failure`,
+  `readmission_30d`).
+- `hybrid` mean AUROC improves at every step: 0.7287 (48M) → 0.7328 (200M) →
+  0.7356 (1B), the highest mean AUROC of any cell across all three budgets
+  (above `gbm` 0.7261 and `lr` 0.6949).
+- At 1B, `hybrid` leads `ar` on 6 of 7 tasks (all but `mortality_365d`) by
+  0.47 to 3.84 AUROC points; `ar` leads on `mortality_365d` by 2.61 points.
+- Both 1B rows are a single seed (seed 0). A seed-replication grid at 1B
+  (`scale1b-seeds-desynpuf`, seeds 1 and 2 for `ar` and `hybrid`) is running
+  now.
+
+**Pilot findings** (from
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the
 consolidated table for grids 1-4: 20 trained cells, 2,930 steps /
 48,005,120 tokens each, 3,000 held-out DE-SynPUF subjects, 200 bootstrap
-resamples, seed 0):
+resamples, seed 0, 4L/192d encoder, Apple M4/MPS):
 
 - `ar` scores mean AUROC 0.7205 across the 7 tasks, +0.0445 over its own
   `random_init@ar` control (0.6760).
@@ -205,8 +225,8 @@ through the same, but untrained, architecture as its control.*
 
 ## Roadmap
 
-- Grid 5: a seed sweep on a subset of grids 1-4's cells (training now).
-- Scale up on an RTX 4070 with the full MIMIC-IV v3.1 extract.
+- Seeds at 1B (`scale1b-seeds-desynpuf`): pending.
+- Scale up on the full MIMIC-IV v3.1 extract.
 - Evaluate against the EHRSHOT task suite and MEDS-DEV.
 - Release: pretrained weights, benchmark numbers, and a citable preprint.
 
