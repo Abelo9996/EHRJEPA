@@ -28,7 +28,7 @@
 # See docs/experiments/PILOT_RESULTS.md for the grids 1-4 numbers these four
 # cells are read against.
 
-name: scale-desynpuf
+name: scale1b-desynpuf
 base: configs/pretrain_scale.yaml
 source: desynpuf-s1
 budget_tokens: 1000000000

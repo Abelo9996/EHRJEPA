@@ -11,8 +11,8 @@ cd "$(dirname "$0")/.."
 wait_for="$1"; grid="$2"; name="$3"
 pid="$(pgrep -f "ablate.py.*${wait_for}" | head -n 1 || true)"
 if [ -z "$pid" ]; then
-  echo "no running ablate.py matching '${wait_for}'; launching immediately"
-  exec scripts/launch_grid.sh "$grid" "$name"
+  echo "no running ablate.py matching '${wait_for}'; refusing to launch (use scripts/launch_grid.sh)" >&2
+  exit 1
 fi
 mkdir -p "runs/$name"
 if tmux has-session -t "$name" 2>/dev/null; then
