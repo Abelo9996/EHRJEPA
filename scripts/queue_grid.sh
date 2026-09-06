@@ -18,7 +18,7 @@ mkdir -p "runs/$name"
 if tmux has-session -t "$name" 2>/dev/null; then
   echo "tmux session '$name' already exists"; exit 0
 fi
-tmux new-session -d -s "$name" \
+setsid -f tmux new-session -d -s "$name" \
   "scripts/queue_after.sh $pid uv run python scripts/ablate.py '$grid' > 'runs/$name/ablate.log' 2>&1"
 sleep 2
 tmux ls
