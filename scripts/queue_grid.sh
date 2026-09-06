@@ -27,7 +27,7 @@ if [ "$(id -u)" = 0 ] && systemctl is-system-running --quiet 2>/dev/null; then
   if systemctl is-active --quiet "$unit"; then
     echo "unit $unit already active"; exit 0
   fi
-  chown -R "$owner" "runs/$name"
+  chown -R "$owner" "runs/$name"; touch "$log"; chown "$owner" "$log"
   systemd-run --unit="$unit" --collect \
     -p User="$owner" -p WorkingDirectory="$repo" \
     -p StandardOutput="append:$log" -p StandardError="append:$log" \
