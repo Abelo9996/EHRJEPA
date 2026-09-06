@@ -694,7 +694,7 @@ def test_anchor_times_line_up_with_the_tensor_cache() -> None:
         assert history["code_id"].size == expected
 
 
-def test_random_init_cache_name_is_keyed_on_the_architecture_it_copies() -> None:
+def test_random_init_cache_name_is_keyed_on_the_architecture_it_copies(tmp_path: Path) -> None:
     """Two grids' untrained controls must not collide in the embedding cache.
 
     ``random_init`` is named after what it is, not after the checkpoint it copies
@@ -703,12 +703,17 @@ def test_random_init_cache_name_is_keyed_on_the_architecture_it_copies() -> None
     control that controls for nothing, with entirely plausible-looking AUROCs.
     Caught by the phase-5a micro-grid, where both cells' controls came back
     identical to each other and to the phase-4 numbers.
+
+    Both checkpoints here are paths under ``tmp_path`` that are never written,
+    so no content fingerprint is available and ``cache_name`` falls back to the
+    run-directory name alone -- the fingerprinted case (real files) is covered
+    by ``test_ckpt_cache_name_is_keyed_on_checkpoint_content`` below.
     """
     from ehrjepa.eval.probe import embedding_path
     from ehrjepa.eval.run import parse_models
 
-    pilot = parse_models(["random_init", "ckpt:runs/pilot/ar/final.pt"])[0]
-    sanity = parse_models(["random_init", "ckpt:runs/sanity-A-default/final.pt"])[0]
+    pilot = parse_models(["random_init", f"ckpt:{tmp_path}/pilot/ar/final.pt"])[0]
+    sanity = parse_models(["random_init", f"ckpt:{tmp_path}/sanity-A-default/final.pt"])[0]
     assert pilot.name == sanity.name == "random_init", "the display name stays stable"
     assert pilot.cache_name == "random_init@ar"
     assert sanity.cache_name == "random_init@sanity-A-default"
@@ -717,5 +722,48 @@ def test_random_init_cache_name_is_keyed_on_the_architecture_it_copies() -> None
     )
 
     # A trained checkpoint is already named after its run directory.
-    trained = parse_models(["ckpt:runs/pilot/ar/final.pt"])[0]
+    trained = parse_models([f"ckpt:{tmp_path}/pilot/ar/final.pt"])[0]
     assert trained.cache_name == trained.name == "ckpt:ar"
+
+
+def test_ckpt_cache_name_is_keyed_on_checkpoint_content(tmp_path: Path) -> None:
+    """Two grids that both name a cell ``ar`` must not share a cache entry.
+
+    ``ModelSpec.cache_name`` used to be the display name alone (``ckpt:ar``),
+    derived from the run directory rather than the checkpoint file. Two grids
+    (e.g. ``scale-desynpuf`` and ``scale1b-desynpuf``) that both happen to name
+    a cell ``ar`` then collide on one cache file, and the second grid silently
+    reports the first grid's embeddings. Appending a content fingerprint of the
+    checkpoint file to the cache name fixes that without touching the display
+    name shown in summary tables.
+    """
+    from ehrjepa.eval.run import parse_models
+
+    run_a = tmp_path / "grid-a" / "ar"
+    run_b = tmp_path / "grid-b" / "ar"
+    run_a.mkdir(parents=True)
+    run_b.mkdir(parents=True)
+    ckpt_a = run_a / "final.pt"
+    ckpt_b = run_b / "final.pt"
+    ckpt_a.write_bytes(b"\x00" * 1024 + b"model-a-weights")
+    ckpt_b.write_bytes(b"\x00" * 1024 + b"model-b-weights")
+
+    # Explicit pooling so ``parse_models`` never tries to load these fake
+    # checkpoints to resolve ``auto`` pooling -- this test is only about the
+    # cache key, not about reading a real encoder config.
+    spec_a = parse_models([f"ckpt:{ckpt_a}"], probe_features="cls_mean")[0]
+    spec_b = parse_models([f"ckpt:{ckpt_b}"], probe_features="cls_mean")[0]
+
+    # Same display name (both cells are called "ar"), different files.
+    assert spec_a.name == spec_b.name == "ckpt:ar"
+    assert spec_a.cache_name != spec_b.cache_name
+    assert probe.embedding_path("c", "src", spec_a.cache_name) != probe.embedding_path(
+        "c", "src", spec_b.cache_name
+    )
+
+    # The same file, parsed twice, must resolve to the same cache name.
+    spec_a_again = parse_models([f"ckpt:{ckpt_a}"], probe_features="cls_mean")[0]
+    assert spec_a.cache_name == spec_a_again.cache_name
+
+    # Display name in summary tables stays the plain run-directory name.
+    assert spec_a.name == "ckpt:ar"

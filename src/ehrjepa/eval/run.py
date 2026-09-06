@@ -85,6 +85,27 @@ def restrict_eval_split(
     return pl.concat([other, kept_eval]).sort("subject_id")
 
 
+def _content_fingerprint(path: Path, chunk_size: int = 1 << 20) -> str:
+    """Cheap, collision-resistant identity for a (possibly 150+ MB) checkpoint.
+
+    Hashing the whole file on every cache lookup is wasteful; hashing only its
+    size and mtime is not proof against two different training runs that
+    happen to land on the same size at nearly the same time. This hashes the
+    size, the ``mtime_ns``, and the first and last ``chunk_size`` bytes, which
+    catches every realistic collision at the cost of two small reads.
+    """
+    stat = path.stat()
+    digest = hashlib.sha256()
+    digest.update(str(stat.st_size).encode())
+    digest.update(str(stat.st_mtime_ns).encode())
+    with path.open("rb") as fh:
+        digest.update(fh.read(chunk_size))
+        if stat.st_size > chunk_size:
+            fh.seek(max(stat.st_size - chunk_size, 0))
+            digest.update(fh.read(chunk_size))
+    return digest.hexdigest()[:12]
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     """One column of the results table."""
@@ -104,20 +125,26 @@ class ModelSpec:
 
     @property
     def cache_name(self) -> str:
-        """Cache identity, which is not the display name for ``random_init``.
+        """Cache identity, which is not the display name for a checkpoint model.
 
-        Every ``ckpt:<path>`` spec is already named after its run directory, so
-        two checkpoints never share a cache file. ``random_init`` is not: it is
-        named after what it *is*, and its vectors depend entirely on the
-        architecture it copies from the checkpoint it was given. Keyed on the
-        display name alone, an untrained 4x192 encoder would silently read back
-        an untrained 6x256 one cached by an earlier experiment -- which is a
-        control that controls for nothing, and which produces AUROCs that look
-        perfectly plausible.
+        Every ``ckpt:<path>`` spec is *named* after its run directory, but two
+        different grids routinely reuse the same cell name (``ar``, ``bert``, ...)
+        for two different checkpoints. Keyed on the display name alone, the
+        second grid would silently read back embeddings the first grid cached --
+        a stale hit that produces AUROCs that look perfectly plausible. Appending
+        a content fingerprint of the checkpoint file makes the key follow the
+        weights, not the path they happened to be run under.
+
+        ``random_init`` has the same problem one level up: it is named after
+        what it *is*, and its vectors depend entirely on the architecture it
+        copies from the checkpoint it was given, so it gets the same
+        fingerprint treatment keyed on that checkpoint.
         """
-        if self.random_init and self.checkpoint is not None:
-            return f"random_init@{self.checkpoint.parent.name}"
-        return self.name
+        if self.checkpoint is None:
+            return self.name
+        fingerprint = _content_fingerprint(self.checkpoint) if self.checkpoint.exists() else None
+        base = f"random_init@{self.checkpoint.parent.name}" if self.random_init else self.name
+        return f"{base}-{fingerprint}" if fingerprint else base
 
 
 def parse_models(
