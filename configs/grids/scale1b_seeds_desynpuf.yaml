@@ -49,7 +49,9 @@ control_models: [random_init]
 # One untrained control per architecture: `ar` and `hybrid` are both causal
 # (last@final pooling), `recon_only` and `jepa_ema` are both bidirectional
 # (mean@final) -- same reasoning as grids 1-4's control_runs.
-control_runs:
+control_runs: [ar_s1, hybrid_s1]
+
+runs:
   - name: ar_s1
     overrides:
       run.seed: 1
