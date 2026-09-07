@@ -907,11 +907,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 state = "RUN"
             total += 0 if skip or entry["reuse"] else entry["tokens"]
-            note = (
-                "  (checkpoint not found locally -- plan only)"
-                if entry.get("missing")
-                else ""
-            )
+            note = "  (checkpoint not found locally -- plan only)" if entry.get("missing") else ""
             print(
                 f"  {state:<11} {entry['run']:<18} {entry['steps']:>6} steps x "
                 f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:>12,} tokens  "
