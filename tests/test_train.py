@@ -209,3 +209,42 @@ def test_resume_reproduces_an_uninterrupted_run(tmp_path: Path) -> None:
     for key, expected in reference.items():
         actual = second.model.state_dict()[key]
         assert torch.allclose(actual, expected, atol=1e-5), f"{key} diverged after resume"
+
+
+@requires_cache
+def test_resume_in_the_same_out_dir_appends_metrics_and_matches_a_straight_run(
+    tmp_path: Path,
+) -> None:
+    """The way ``scripts/ablate.py`` resumes a cell interrupted mid-run: same
+    ``out_dir``, a mid-run checkpoint from ``ckpt_every``, and a second launch
+    that resumes from ``latest.pt`` and trains on to a higher ``run.steps``.
+    ``metrics.csv`` must be appended to, not truncated -- so a resumed run's
+    rows include the ones logged before the interruption -- and the result must
+    match an uninterrupted 6-step run.
+    """
+    straight = _trainer(tmp_path / "straight", steps=6)
+    final_straight = straight.train()
+
+    out_dir = tmp_path / "resumed"
+    first = _trainer(out_dir, steps=3, **{"run.ckpt_every": "3"})
+    first.train()
+    assert (out_dir / "latest.pt").exists()
+    rows_after_first = (out_dir / "metrics.csv").read_text().strip().splitlines()
+    assert rows_after_first[-1].split(",")[0] == "3"
+
+    second = _trainer(
+        out_dir, steps=6, **{"run.ckpt_every": "3", "run.resume": str(out_dir / "latest.pt")}
+    )
+    # ``run.resume`` in the config is just a value until something acts on it --
+    # ``main()`` does that; here it is done explicitly, the way the earlier
+    # bit-exact resume test does.
+    second.load_checkpoint(out_dir / "latest.pt")
+    assert second.step == 3
+    final_resumed = second.train()
+
+    rows = (out_dir / "metrics.csv").read_text().strip().splitlines()
+    assert rows[: len(rows_after_first)] == rows_after_first, "resume truncated metrics.csv"
+    assert rows[-1].split(",")[0] == "6"
+
+    for key in ("loss", "pred_loss", "sigreg_tokens", "sigreg_cls"):
+        assert final_resumed[key] == pytest.approx(final_straight[key], abs=1e-5)

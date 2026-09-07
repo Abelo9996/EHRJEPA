@@ -173,6 +173,84 @@ def test_a_per_run_budget_overrides_the_grid_default(tmp_path: Path) -> None:
     assert entries[1]["steps"] == 200
 
 
+def test_train_one_passes_the_ckpt_every_override(tmp_path: Path) -> None:
+    """A trained cell checkpoints periodically instead of ``ckpt_every=0``."""
+    grid = ablate.load_grid(_grid_file(tmp_path, ckpt_every=777))
+    entry = ablate.plan(grid)[0]
+    captured: dict[str, list] = {}
+
+    def fake_spawn(command, log) -> None:
+        captured["command"] = list(command)
+
+    real_spawn, real_final = ablate._spawn, ablate._final_metrics
+    ablate._spawn = fake_spawn  # type: ignore[assignment]
+    ablate._final_metrics = lambda out_dir: {"loss": 1.0}  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        ablate.train_one(grid, entry, log)
+        log.close()
+    finally:
+        ablate._spawn, ablate._final_metrics = real_spawn, real_final
+
+    assert "run.ckpt_every=777" in captured["command"]
+    assert "run.ckpt_every=0" not in captured["command"]
+    assert not any(str(c).startswith("run.resume=") for c in captured["command"])
+
+
+def test_train_one_resumes_from_a_latest_checkpoint_without_a_final(tmp_path: Path) -> None:
+    """A ``latest.pt`` with no ``final.pt`` means the cell was mid-run -- resume it."""
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    entry = ablate.plan(grid)[0]
+    out_dir = Path(entry["out_dir"])
+    out_dir.mkdir(parents=True)
+    latest = out_dir / "latest.pt"
+    latest.write_bytes(b"not a real checkpoint")
+    captured: dict[str, list] = {}
+
+    def fake_spawn(command, log) -> None:
+        captured["command"] = list(command)
+
+    real_spawn, real_final = ablate._spawn, ablate._final_metrics
+    ablate._spawn = fake_spawn  # type: ignore[assignment]
+    ablate._final_metrics = lambda out_dir: {"loss": 1.0}  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        ablate.train_one(grid, entry, log)
+        log.close()
+    finally:
+        ablate._spawn, ablate._final_metrics = real_spawn, real_final
+
+    assert f"run.resume={latest}" in captured["command"]
+    log_text = (tmp_path / "log.txt").read_text()
+    assert f"resuming {entry['run']}" in log_text
+
+
+def test_train_one_does_not_resume_when_final_already_exists(tmp_path: Path) -> None:
+    """``final.pt`` present means the cell is done, even with a stray ``latest.pt``."""
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    entry = ablate.plan(grid)[0]
+    out_dir = Path(entry["out_dir"])
+    out_dir.mkdir(parents=True)
+    (out_dir / "latest.pt").write_bytes(b"not a real checkpoint")
+    (out_dir / "final.pt").write_bytes(b"not a real checkpoint either")
+    (out_dir / "metrics.csv").write_text("step,loss\n1,1.0\n")
+
+    # The final.pt + metrics.csv reuse path short-circuits before ever spawning.
+    def fail_spawn(command, log) -> None:
+        raise AssertionError("should not train a cell that already has final.pt")
+
+    real_spawn = ablate._spawn
+    ablate._spawn = fail_spawn  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        result = ablate.train_one(grid, entry, log)
+        log.close()
+    finally:
+        ablate._spawn = real_spawn
+
+    assert result["wall_s"] == 0.0
+
+
 def test_plan_skips_runs_already_in_the_summary(tmp_path: Path) -> None:
     grid = ablate.load_grid(_grid_file(tmp_path))
     grid.summary_json.parent.mkdir(parents=True, exist_ok=True)

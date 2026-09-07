@@ -14,10 +14,16 @@ max_len))``. A run that shortens its window or its batch gets proportionally mor
 steps, so "same budget" survives a config change instead of quietly becoming
 "same number of gradient updates".
 
-**Resumable, at run granularity.** A run whose row is already in
-``summary.json`` is skipped. A 16 GB laptop running a six-run grid overnight will
-be interrupted -- by a sleep, an OOM, a closed lid -- and the recovery has to be
-"launch the same command again", not "work out which four runs finished".
+**Resumable, at run granularity and mid-run.** A run whose row is already in
+``summary.json`` is skipped. A cell still training when a grid is interrupted --
+by a sleep, an OOM, a closed lid, a ``systemctl stop`` -- picks up from its own
+``latest.pt`` rather than restarting from step zero: the trainer checkpoints
+periodically during a cell (``grid.ckpt_every``, default every 2000 steps) and
+the next launch of the same command hands it ``run.resume=<out_dir>/latest.pt``
+whenever that file exists and the cell has not yet produced a ``final.pt``. A 16
+GB laptop running a six-run grid overnight will be interrupted, and the recovery
+has to be "launch the same command again", not "work out which four runs
+finished and how far the fifth one got".
 
 **Re-evaluation without retraining.** A run may name ``reuse_checkpoint:``
 instead of training: the cell is scored from a checkpoint an earlier grid already
@@ -143,6 +149,9 @@ class Grid:
     control_runs: tuple[str, ...] = ()
     docs_root: Path = Path("docs/experiments")
     runs_root: Path = Path("runs")
+    #: How often a training cell checkpoints to ``latest.pt``. Non-zero so a cell
+    #: interrupted mid-run can resume instead of restarting from step zero.
+    ckpt_every: int = 2000
 
     @property
     def doc_dir(self) -> Path:
@@ -190,6 +199,7 @@ def load_grid(path: str | Path) -> Grid:
         "control_runs",
         "docs_root",
         "runs_root",
+        "ckpt_every",
     }
     unknown = set(raw) - known
     if unknown:
@@ -405,7 +415,10 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = Fals
 
     If the cell already has a ``final.pt`` and ``metrics.csv`` (a previous grid
     attempt trained it but failed later, e.g. in eval), training is skipped and
-    those artifacts are reused unless ``force`` is set.
+    those artifacts are reused unless ``force`` is set. Otherwise, if the cell has
+    a ``latest.pt`` but no ``final.pt`` -- it was mid-run when the grid was last
+    interrupted -- the trainer is handed ``run.resume`` so it continues from that
+    checkpoint's step instead of restarting at zero.
     """
     out_dir = Path(entry["out_dir"])
     if not force and (out_dir / "final.pt").exists() and (out_dir / "metrics.csv").exists():
@@ -413,6 +426,15 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = Fals
         final = _final_metrics(out_dir)
         final["wall_s"] = 0.0
         return final
+    resume_args: list[str] = []
+    latest = out_dir / "latest.pt"
+    if not force and latest.exists() and not (out_dir / "final.pt").exists():
+        step = _checkpoint_step(latest)
+        if step is not None:
+            log.say(f"resuming {entry['run']} from step {step}")
+        else:
+            log.say(f"resuming {entry['run']} from {latest}")
+        resume_args = [f"run.resume={latest}"]
     overrides = [f"{k}={_scalar(v)}" for k, v in entry["overrides"].items()]
     started = time.perf_counter()
     _spawn(
@@ -426,7 +448,8 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = Fals
             f"run.steps={entry['steps']}",
             f"run.seed={grid.seed}",
             f"run.out_dir={out_dir}",
-            "run.ckpt_every=0",
+            f"run.ckpt_every={grid.ckpt_every}",
+            *resume_args,
             *overrides,
         ],
         log,
@@ -435,6 +458,21 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = Fals
     final = _final_metrics(out_dir)
     final["wall_s"] = round(wall, 1)
     return final
+
+
+def _checkpoint_step(path: Path) -> int | None:
+    """The ``step`` recorded in a checkpoint, or ``None`` if it cannot be read.
+
+    Used only for the log line: a corrupt or partially-written checkpoint (e.g.
+    killed mid-``torch.save``) must not stop the resume, just make its log line
+    less specific.
+    """
+    try:
+        import torch
+
+        return int(torch.load(path, map_location="cpu", weights_only=False)["step"])
+    except Exception:
+        return None
 
 
 def _final_metrics(out_dir: Path) -> dict:
