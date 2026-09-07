@@ -59,6 +59,26 @@ def test_steps_are_the_ceiling_of_the_budget_over_the_nominal_window() -> None:
 def test_steps_reject_a_degenerate_shape() -> None:
     with pytest.raises(ValueError):
         ablate.steps_for(1000, 0, 256)
+    # accum_steps <= 0 is clamped to 1, mirroring the trainer's own
+    # ``max(1, cfg.optim.accum_steps)`` -- it is not a degenerate shape.
+    assert ablate.steps_for(1000, 32, 256, accum_steps=0) == ablate.steps_for(1000, 32, 256)
+
+
+def test_steps_account_for_gradient_accumulation() -> None:
+    """A halved batch with 2-step accumulation must not double the real budget.
+
+    The trainer's ``step`` counter advances once per *optimizer* step, which
+    runs ``accum_steps`` micro-batches first (``Trainer.train``) -- so a cell
+    trading ``batch_size: 64`` for ``batch_size: 32`` + ``accum_steps: 2`` needs
+    half as many optimizer steps for the same nominal tokens, not the same
+    number computed as if accumulation did not exist.
+    """
+    assert ablate.steps_for(32_768_000, 32, 512, accum_steps=2) == ablate.steps_for(
+        32_768_000, 64, 512
+    )
+    assert ablate.steps_for(32_768_000, 32, 512, accum_steps=1) == 2 * ablate.steps_for(
+        32_768_000, 32, 512, accum_steps=2
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -134,6 +154,32 @@ def test_a_reused_checkpoint_is_planned_from_the_run_that_trained_it(tmp_path: P
     ablate.main([str(path), "--dry-run", "--only", "ar_last"])
 
 
+def test_a_reused_checkpoint_missing_locally_still_dry_runs(tmp_path: Path, capsys) -> None:
+    """A ``reuse_checkpoint`` that lives on another machine must not crash planning.
+
+    A grid that re-scores a GPU box's checkpoints has to be plannable (and
+    ``--dry-run``-able) on a machine that has never seen those files -- only
+    actually evaluating the cell should require the checkpoint to exist.
+    """
+    missing = tmp_path / "elsewhere" / "ar" / "final.pt"
+    path = _grid_file(tmp_path)
+    raw = yaml.safe_load(path.read_text())
+    raw["runs"] = [{"name": "ar_base_s0", "reuse_checkpoint": str(missing)}]
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    entries = ablate.plan(ablate.load_grid(path))
+    entry = entries[0]
+    assert entry["reuse"] is True
+    assert entry["missing"] is True
+    assert entry["checkpoint"] == str(missing)
+    assert entry["steps"] == 0 and entry["tokens"] == 0
+
+    assert ablate.main([str(path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "REUSE?" in out
+    assert "checkpoint not found locally" in out
+
+
 def test_a_reused_cell_costs_no_training_budget(tmp_path: Path, capsys) -> None:
     checkpoint = _finished_run(tmp_path / "elsewhere", "jepa_ema")
     path = _grid_file(tmp_path)
@@ -171,6 +217,29 @@ def test_a_per_run_budget_overrides_the_grid_default(tmp_path: Path) -> None:
     entries = ablate.plan(ablate.load_grid(path))
     assert entries[0]["steps"] == 100
     assert entries[1]["steps"] == 200
+
+
+def test_plan_spends_the_same_tokens_under_gradient_accumulation(tmp_path: Path) -> None:
+    """A run that halves its batch and doubles ``accum_steps`` costs the same budget.
+
+    Each optimizer step still consumes ``batch_size x max_len x accum_steps``
+    nominal tokens -- half the batch times twice the accumulation is the same
+    per-step total -- so a cell overriding to ``batch_size: 32`` with
+    ``optim.accum_steps: 2`` must plan to the *same* token total and the *same*
+    step count as one left at the unaccumulated ``batch_size: 64`` default, not
+    to a step count computed as if accumulation did not exist (which would
+    silently double its real token spend).
+    """
+    path = _grid_file(tmp_path)
+    raw = yaml.safe_load(path.read_text())
+    raw["runs"][0]["overrides"]["run.batch_size"] = 32
+    raw["runs"][0]["overrides"]["optim.accum_steps"] = 2
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    entries = ablate.plan(ablate.load_grid(path))
+    accumulated, plain = entries[0], entries[1]
+    assert accumulated["batch_size"] == 32
+    assert accumulated["tokens"] == plain["tokens"]
+    assert accumulated["steps"] == plain["steps"]
 
 
 def test_train_one_passes_the_ckpt_every_override(tmp_path: Path) -> None:
@@ -290,6 +359,162 @@ def test_only_restricts_the_plan(tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert "jepa_ema" in out
     assert "\n  RUN         ar " not in out
+
+
+# --------------------------------------------------------------------------- #
+# Evaluation: the full-held-out path and fresh baselines
+# --------------------------------------------------------------------------- #
+
+
+def _fake_results(eval_dir: Path) -> None:
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    (eval_dir / "results.json").write_text(json.dumps({"tasks": {}, "models": {}}))
+
+
+def test_eval_one_omits_the_subject_limit_flag_when_none(tmp_path: Path) -> None:
+    """``eval_subject_limit: null`` must score the full held-out split.
+
+    The harness's own default (``--eval-subject-limit`` absent) is "no limit",
+    so the runner has to omit the flag rather than invent a value -- passing
+    ``--eval-subject-limit 0`` or the literal string ``None`` would either error
+    or silently keep every subject for the wrong reason.
+    """
+    grid = ablate.load_grid(_grid_file(tmp_path, eval_subject_limit=None))
+    entry = ablate.plan(grid)[0]
+    captured: dict[str, list] = {}
+
+    def fake_spawn(command, log) -> None:
+        captured["command"] = list(command)
+        _fake_results(Path(entry["eval_dir"]))
+
+    real_spawn = ablate._spawn
+    ablate._spawn = fake_spawn  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        ablate.eval_one(grid, entry, with_controls=False, log=log)
+        log.close()
+    finally:
+        ablate._spawn = real_spawn
+
+    assert "--eval-subject-limit" not in captured["command"]
+    assert "--eval-subject-seed" not in captured["command"]
+
+
+def test_eval_one_keeps_the_subject_limit_flag_when_set(tmp_path: Path) -> None:
+    grid = ablate.load_grid(_grid_file(tmp_path, eval_subject_limit=3000))
+    entry = ablate.plan(grid)[0]
+    captured: dict[str, list] = {}
+
+    def fake_spawn(command, log) -> None:
+        captured["command"] = list(command)
+        _fake_results(Path(entry["eval_dir"]))
+
+    real_spawn = ablate._spawn
+    ablate._spawn = fake_spawn  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        ablate.eval_one(grid, entry, with_controls=False, log=log)
+        log.close()
+    finally:
+        ablate._spawn = real_spawn
+
+    assert "--eval-subject-limit" in captured["command"]
+    assert "3000" in captured["command"]
+
+
+def test_baselines_needed_without_reuse_predictions_until_cached(tmp_path: Path) -> None:
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    assert grid.reuse_predictions is None
+    assert ablate.baselines_needed(grid, {}) is True
+    assert ablate.baselines_needed(grid, {"lr": {}, "gbm": {}}) is False
+    assert ablate.baselines_needed(grid, {"lr": {}}) is True
+
+
+def test_baselines_not_needed_when_reuse_predictions_is_set(tmp_path: Path) -> None:
+    grid = ablate.load_grid(
+        _grid_file(tmp_path, reuse_predictions="docs/experiments/x/predictions.parquet")
+    )
+    assert ablate.baselines_needed(grid, {}) is False
+
+
+def test_eval_one_adds_reuse_models_when_baselines_are_needed(tmp_path: Path) -> None:
+    """``with_baselines`` rides ``lr``/``gbm`` along on this cell's command."""
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    entry = ablate.plan(grid)[0]
+    captured: dict[str, list] = {}
+
+    def fake_spawn(command, log) -> None:
+        captured["command"] = list(command)
+        _fake_results(Path(entry["eval_dir"]))
+
+    real_spawn = ablate._spawn
+    ablate._spawn = fake_spawn  # type: ignore[assignment]
+    try:
+        log = ablate.Log(tmp_path / "log.txt")
+        ablate.eval_one(grid, entry, with_controls=False, log=log, with_baselines=True)
+        log.close()
+    finally:
+        ablate._spawn = real_spawn
+
+    models_arg = captured["command"][captured["command"].index("--models") + 1]
+    assert models_arg.split(",")[:2] == ["lr", "gbm"]
+
+
+def test_baselines_for_caches_fresh_lr_gbm_without_reuse_predictions(tmp_path: Path) -> None:
+    """No ``reuse_predictions`` file: ``lr``/``gbm`` are cached from ``fresh`` instead.
+
+    They land under their bare model name -- not ``lr@ar`` -- because, unlike
+    ``random_init``, they do not depend on which cell happened to compute them.
+    """
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    fresh = {
+        "lr": {"mortality_365d": 0.60},
+        "gbm": {"mortality_365d": 0.62},
+        "ckpt:ar": {"mortality_365d": 0.70},
+    }
+    stored = ablate.baselines_for(grid, fresh, "ar")
+    assert stored["lr"]["mortality_365d"] == 0.60
+    assert stored["gbm"]["mortality_365d"] == 0.62
+    assert "ckpt:ar" not in stored
+
+    # Cached to disk, and picked up on a later call with no `fresh` at all.
+    again = ablate.baselines_for(grid)
+    assert again["lr"]["mortality_365d"] == 0.60
+
+
+def test_baselines_for_does_not_fabricate_lr_gbm_when_reuse_predictions_is_set(
+    tmp_path: Path,
+) -> None:
+    """A grid with a real ``reuse_predictions`` file must not also self-fit."""
+    grid = ablate.load_grid(
+        _grid_file(
+            tmp_path, reuse_predictions="docs/experiments/does-not-exist/predictions.parquet"
+        )
+    )
+    fresh = {"lr": {"mortality_365d": 0.60}, "ckpt:ar": {"mortality_365d": 0.70}}
+    stored = ablate.baselines_for(grid, fresh, "ar")
+    assert "lr" not in stored
+
+
+def test_render_summary_describes_the_full_held_out_split_when_limit_is_none() -> None:
+    payload = {
+        "grid": "g",
+        "base": "configs/pretrain_scale.yaml",
+        "source": "desynpuf-s1",
+        "updated": "2026-09-07T00:00:00+00:00",
+        "eval": {
+            "bootstrap": 200,
+            "eval_subject_limit": None,
+            "eval_subject_seed": 0,
+            "probe_features": "auto",
+            "probe_layer": "final",
+        },
+        "runs": [],
+    }
+    text = ablate.render_summary(payload)
+    assert "the full held-out split" in text
+    assert "None-subject" not in text
+    assert "None" not in text.split("\n")[2]
 
 
 # --------------------------------------------------------------------------- #

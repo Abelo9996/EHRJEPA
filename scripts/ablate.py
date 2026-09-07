@@ -10,9 +10,13 @@ and seeds every other row was scored on, and appends one line to
 Three properties are what make the script worth having rather than a shell loop:
 
 **Matched compute, not matched steps.** ``steps = ceil(budget_tokens / (batch x
-max_len))``. A run that shortens its window or its batch gets proportionally more
-steps, so "same budget" survives a config change instead of quietly becoming
-"same number of gradient updates".
+max_len x accum_steps))``. A run that shortens its window or its batch gets
+proportionally more steps, so "same budget" survives a config change instead of
+quietly becoming "same number of gradient updates" -- and a run that trades
+batch size for gradient accumulation to fit a VRAM budget (``batch_size: 32``,
+``optim.accum_steps: 2`` in place of ``batch_size: 64``) spends the *same*
+nominal tokens per step it did before the trade, because the trainer's ``step``
+counter advances once per optimizer step, not once per micro-batch.
 
 **Resumable, at run granularity and mid-run.** A run whose row is already in
 ``summary.json`` is skipped. A cell still training when a grid is interrupted --
@@ -34,7 +38,12 @@ directory.
 
 **Baselines computed once.** ``lr`` and ``gbm`` are count-feature models with no
 dependence on the encoder, so their held-out scores are read straight out of an
-earlier run's ``predictions.parquet`` rather than refit six times.
+earlier run's ``predictions.parquet`` (``reuse_predictions:``) rather than refit
+six times. A grid with no ``reuse_predictions`` -- because the earlier run's
+cohort does not match this grid's, e.g. a full-held-out grid cannot reuse a
+3,000-subject run's scores -- fits them itself instead, once, riding along on
+whichever cell's eval command runs first; every later cell finds them already in
+``baselines.json`` and asks for nothing more.
 ``random_init`` *does* depend on the architecture, so it is computed once per
 cell named in ``control_runs`` and cached in ``baselines.json`` as
 ``random_init@<run>``: the control for a 4x192 encoder has to be an untrained
@@ -260,17 +269,28 @@ def load_grid(path: str | Path) -> Grid:
 # --------------------------------------------------------------------------- #
 
 
-def steps_for(budget_tokens: int, batch_size: int, max_len: int) -> int:
-    """Gradient steps that spend ``budget_tokens`` at ``batch_size x max_len``.
+def steps_for(budget_tokens: int, batch_size: int, max_len: int, accum_steps: int = 1) -> int:
+    """*Optimizer* steps that spend ``budget_tokens`` at ``batch_size x max_len``.
 
     The product is the *nominal* window: real batches are right-padded, so a step
     consumes this many token slots and somewhat fewer real events. Budgeting on
     the nominal number is what keeps two configs comparable -- the padded fraction
     is a property of the data and the window length, not of the objective.
+
+    ``accum_steps`` has to be in this product, not just ``batch_size x max_len``:
+    the trainer's ``step`` counter (see ``Trainer.train``) advances once per
+    *optimizer* step, and each optimizer step runs ``accum_steps`` micro-batches
+    of ``batch_size x max_len`` before it calls ``optimizer.step()``. A cell that
+    halves its batch size and sets ``accum_steps: 2`` to fit a fixed VRAM budget
+    (same effective batch, half the activation memory) consumes the *same*
+    nominal tokens per optimizer step as it did unaccumulated -- so its step
+    count, and therefore its ``run.steps`` override, must not be computed as if
+    ``accum_steps`` were still 1, or the cell would silently spend twice its
+    budget.
     """
-    per_step = batch_size * max_len
+    per_step = batch_size * max_len * max(1, accum_steps)
     if per_step <= 0:
-        raise ValueError("batch_size and max_len must be positive")
+        raise ValueError("batch_size, max_len and accum_steps must be positive")
     return max(1, math.ceil(budget_tokens / per_step))
 
 
@@ -294,13 +314,14 @@ def plan(grid: Grid) -> list[dict]:
 def _train_entry(grid: Grid, item: GridRun) -> dict:
     """The cell resolved from the grid's base config plus this run's overrides."""
     config = load_config(REPO / grid.base, item.override_strings())
-    steps = steps_for(item.budget_tokens, config.run.batch_size, config.data.max_len)
+    accum = max(1, config.optim.accum_steps)
+    steps = steps_for(item.budget_tokens, config.run.batch_size, config.data.max_len, accum)
     out_dir = grid.run_root / item.name
     return {
         "batch_size": config.run.batch_size,
         "max_len": config.data.max_len,
         "steps": steps,
-        "tokens": steps * config.run.batch_size * config.data.max_len,
+        "tokens": steps * config.run.batch_size * config.data.max_len * accum,
         "objective": config.objective.kind,
         # The three JEPA knobs are meaningless for an AR cell: it has no target
         # network, no SIGReg term and no context/target masking. Reporting the
@@ -323,21 +344,44 @@ def _reuse_entry(item: GridRun) -> dict:
     Everything describing the training comes from that run's own ``config.json``,
     not from this grid's base: the row has to say what was actually trained, and
     this grid's base may differ from the one that trained it.
+
+    A checkpoint that was trained elsewhere -- a GPU machine this grid was
+    authored on but has not run on yet -- has no local ``config.json``. Planning
+    still has to name the row, so this returns a placeholder rather than
+    raising; ``run_grid`` fails loudly, naming the missing path, the moment it
+    actually tries to evaluate the cell.
     """
     assert item.reuse_checkpoint is not None
     checkpoint = REPO / item.reuse_checkpoint
     source = checkpoint.parent
-    config = json.loads((source / "config.json").read_text())
+    config_path = source / "config.json"
+    if not config_path.exists():
+        return {
+            "batch_size": 0,
+            "max_len": 0,
+            "steps": 0,
+            "tokens": 0,
+            "objective": "?",
+            "target_mode": None,
+            "lambda_sigreg": None,
+            "p_future": None,
+            "out_dir": str(source),
+            "checkpoint": str(checkpoint),
+            "reuse": True,
+            "missing": True,
+        }
+    config = json.loads(config_path.read_text())
     kind = str(config["objective"]["kind"])
     batch_size = int(config["run"]["batch_size"])
     max_len = int(config["data"]["max_len"])
     steps = int(config["run"]["steps"])
+    accum = max(1, int(config.get("optim", {}).get("accum_steps", 1)))
 
     return {
         "batch_size": batch_size,
         "max_len": max_len,
         "steps": steps,
-        "tokens": steps * batch_size * max_len,
+        "tokens": steps * batch_size * max_len * accum,
         "objective": kind,
         "target_mode": _latent_only(kind, str(config["model"].get("target_mode", "shared"))),
         "lambda_sigreg": _latent_only(kind, config["objective"]["lambda_sigreg"]),
@@ -500,7 +544,11 @@ def _number(text: str) -> float:
 
 
 def eval_one(
-    grid: Grid, entry: Mapping[str, Any], with_controls: bool, log: Log
+    grid: Grid,
+    entry: Mapping[str, Any],
+    with_controls: bool,
+    log: Log,
+    with_baselines: bool = False,
 ) -> tuple[dict, dict]:
     """Score one checkpoint on the shared cohort.
 
@@ -508,11 +556,19 @@ def eval_one(
     from the harness rather than from the grid file because ``probe_features:
     auto`` is resolved per checkpoint, and a row that does not say which pooling
     produced its AUROCs is not comparable to anything.
+
+    ``with_baselines`` adds ``grid.reuse_models`` (``lr``, ``gbm`` by default) to
+    this cell's command. It is only set when the grid has no
+    ``reuse_predictions`` file to read them from and they are not already cached
+    in ``baselines.json`` -- so they are fit exactly once per grid, on whichever
+    cell runs first, rather than once per row.
     """
     checkpoint = Path(entry["checkpoint"])
     models = [f"ckpt:{checkpoint}"]
     if with_controls:
         models = [*grid.control_models, *models]
+    if with_baselines:
+        models = [*grid.reuse_models, *models]
     eval_dir = Path(entry["eval_dir"])
     command = [
         sys.executable,
@@ -558,6 +614,17 @@ def control_name(model: str, run: str) -> str:
     return f"{model}@{run}"
 
 
+def baselines_needed(grid: Grid, have: Mapping[str, Any]) -> bool:
+    """Whether ``lr``/``gbm`` still need fitting for this grid.
+
+    True only when the grid has no ``reuse_predictions`` file to read them from
+    *and* at least one of ``grid.reuse_models`` is missing from the cached
+    baselines -- so they ride along on exactly one cell's eval command, first
+    come first served, rather than being refit on every row.
+    """
+    return not grid.reuse_predictions and not all(m in have for m in grid.reuse_models)
+
+
 def baselines_for(
     grid: Grid, fresh: Mapping[str, Mapping[str, float]] | None = None, run: str = ""
 ) -> dict:
@@ -565,7 +632,12 @@ def baselines_for(
 
     Cached in ``baselines.json`` so a resumed grid does not recompute a control
     against a different architecture than the first pass used, and so a control
-    survives being asked for after the cell that produced it has finished.
+    survives being asked for after the cell that produced it has finished. When
+    the grid names no ``reuse_predictions`` file, ``lr``/``gbm`` are instead
+    read out of ``fresh`` (whichever cell's command carried them, see
+    :func:`baselines_needed`) and cached under their bare model name, exactly as
+    :func:`_auroc_from_predictions` would have stored them -- so a row that asks
+    "what did the count baselines score" cannot tell which path produced them.
     """
     path = grid.doc_dir / "baselines.json"
     stored = json.loads(path.read_text()) if path.exists() else {}
@@ -575,6 +647,10 @@ def baselines_for(
         for model in grid.control_models:
             if model in fresh:
                 stored[control_name(model, run)] = dict(fresh[model])
+        if not grid.reuse_predictions:
+            for model in grid.reuse_models:
+                if model in fresh and model not in stored:
+                    stored[model] = dict(fresh[model])
     if stored:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(stored, indent=2, sort_keys=True) + "\n")
@@ -629,7 +705,9 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
             controls_needed = entry["run"] in grid.control_runs and not all(
                 control_name(m, entry["run"]) in have for m in grid.control_models
             )
-            scored, pooling = eval_one(grid, entry, controls_needed, log)
+            scored, pooling = eval_one(
+                grid, entry, controls_needed, log, baselines_needed(grid, have)
+            )
             baselines_for(grid, scored, entry["run"])
             row = _row(entry, final, scored, pooling)
             payload["runs"] = [r for r in payload["runs"] if r["run"] != row["run"]] + [row]
@@ -740,10 +818,15 @@ def render_summary(payload: Mapping[str, Any]) -> str:
 
     lines = [f"# Ablation grid -- {payload.get('grid', '?')}", ""]
     meta = payload.get("eval", {})
+    limit = meta.get("eval_subject_limit")
+    cohort = (
+        f"a {limit}-subject subset (seed {meta.get('eval_subject_seed')})"
+        if limit
+        else "the full held-out split"
+    )
     lines += [
         f"Base config `{payload.get('base', '')}`, source `{payload.get('source', '')}`, "
-        f"held-out AUROC on a {meta.get('eval_subject_limit')}-subject subset "
-        f"(seed {meta.get('eval_subject_seed')}), {meta.get('bootstrap')} bootstrap resamples, "
+        f"held-out AUROC on {cohort}, {meta.get('bootstrap')} bootstrap resamples, "
         f"probe `{meta.get('probe_features')}@{meta.get('probe_layer')}` "
         f"(the `probe` column gives each row's resolved pooling).",
         "",
@@ -815,13 +898,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         total = 0
         for entry in entries:
             skip = entry["done"] and not args.force
-            state = "SKIP (done)" if skip else ("REUSE" if entry["reuse"] else "RUN")
+            if skip:
+                state = "SKIP (done)"
+            elif entry.get("missing"):
+                state = "REUSE?"
+            elif entry["reuse"]:
+                state = "REUSE"
+            else:
+                state = "RUN"
             total += 0 if skip or entry["reuse"] else entry["tokens"]
+            note = (
+                "  (checkpoint not found locally -- plan only)"
+                if entry.get("missing")
+                else ""
+            )
             print(
                 f"  {state:<11} {entry['run']:<18} {entry['steps']:>6} steps x "
                 f"{entry['batch_size']}x{entry['max_len']} = {entry['tokens']:>12,} tokens  "
                 f"{entry['objective']}/{_fmt(entry['target_mode'])} "
-                f"lambda={_fmt(entry['lambda_sigreg'])} p_future={_fmt(entry['p_future'])}"
+                f"lambda={_fmt(entry['lambda_sigreg'])} p_future={_fmt(entry['p_future'])}{note}"
             )
         print(f"  total outstanding: {total:,} tokens")
         return 0

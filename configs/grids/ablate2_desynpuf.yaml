@@ -1,0 +1,282 @@
+# Second-generation ablation: does the hybrid's lead over AR survive a change
+# of model size, which of its own knobs matter, and do the 3,000-subject
+# results from scale-desynpuf / scale1b-seeds-desynpuf hold once every arm is
+# scored on the full held-out split instead of a subsample. See
+# docs/experiments/ablate2-desynpuf/README.md for the three questions this
+# grid answers and the two-seed rule; this file is the mechanism, not the
+# rationale.
+#
+# Base config: configs/pretrain_scale.yaml (6-layer/256-wide encoder,
+# max_len 512, batch 64). Two axes, both at the same 200M nominal-token-slot
+# budget per cell as scale-desynpuf:
+#
+#   Size axis (ar, hybrid x small, base, large):
+#     small   4L/256d -> 4L/192d/4h, predictor sized as configs/pretrain_pilot.yaml
+#             (pred_dim 96, pred_depth 2, pred_heads 4 -- unused by ar/nextlatent,
+#             which build no transformer predictor, but named for the record).
+#     base    6L/256d/4h, unchanged from configs/pretrain_scale.yaml. Not
+#             retrained here: `ar_base_s0` and `hybrid_base_s0` name the
+#             already-trained scale-desynpuf checkpoints via
+#             `reuse_checkpoint`, so the base size is re-scored on the full
+#             held-out set rather than re-trained. Those checkpoints live on
+#             the GPU machine that trained them, not in this worktree -- see
+#             scripts/ablate.py's `_reuse_entry`, which plans a row for a
+#             missing checkpoint instead of failing, so `--dry-run` here does
+#             not require them to exist. Actually evaluating the row does.
+#     large   8L/384d/6h. To stay under 8 GB VRAM (docs/CUDA_SETUP.md's RTX
+#             4060 budget) at this width, `run.batch_size: 32` with
+#             `optim.accum_steps: 2` replaces the base's `batch_size: 64` --
+#             same effective batch, half the activation memory. scripts/ablate.py's
+#             `steps_for` multiplies by `accum_steps`, so the per-optimizer-step
+#             nominal-token rate is unchanged (32 x 512 x 2 = 64 x 512) and the
+#             200M budget lands on the same number of optimizer steps as the
+#             unaccumulated cells, not double it.
+#
+#   Hybrid design axis (base size only): which of the hybrid's own knobs the
+#   scale-desynpuf result depends on -- shared vs. EMA targets, SIGReg on or
+#   off, one horizon vs. three, and a larger reconstruction weight.
+#
+# Every trained cell gets two seeds (1 and 2); the two `reuse_checkpoint` rows
+# name a single already-trained checkpoint each and so have none of their own.
+#
+# `eval_subject_limit: null` scores every held-out subject rather than the
+# 3,000-subject cut the pilot and scale grids used (`restrict_eval_split`
+# returns the frame unchanged when the limit is null -- see tests/test_eval.py
+# and tests/test_ablate.py for the runner and harness paths). That cohort does
+# not match `2026-09-03-eval-desynpuf/predictions.parquet`'s 3,000-subject one,
+# so `reuse_predictions` is left unset: scripts/ablate.py fits `lr`/`gbm` fresh
+# instead, once, riding along on whichever cell's eval command runs first.
+
+name: ablate2-desynpuf
+base: configs/pretrain_scale.yaml
+source: desynpuf-s1
+budget_tokens: 200000000
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One untrained control per distinct encoder architecture (size x causal-ness).
+# `ar` and `hybrid` share an architecture at a given size (both causal, same
+# dim/depth/heads -- the objective difference is in the loss, not the
+# encoder), so one control per size axis cell covers both objectives there.
+# `ar_base_s0` covers the base size for both `ar_base_s0` and
+# `hybrid_base_s0` and for the four base-size hybrid-design-axis pairs, which
+# share that same 6L/256d causal architecture.
+control_runs:
+  - ar_small_s1
+  - hybrid_small_s1
+  - ar_large_s1
+  - hybrid_large_s1
+  - ar_base_s0
+
+runs:
+  # --- Size axis, seed 1 --------------------------------------------------
+  - name: ar_small_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      model.dim: 192
+      model.depth: 4
+      model.heads: 4
+      model.pred_dim: 96
+      model.pred_depth: 2
+      model.pred_heads: 4
+
+  - name: hybrid_small_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      model.dim: 192
+      model.depth: 4
+      model.heads: 4
+      model.pred_dim: 96
+      model.pred_depth: 2
+      model.pred_heads: 4
+
+  - name: ar_large_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      model.dim: 384
+      model.depth: 8
+      model.heads: 6
+      run.batch_size: 32
+      optim.accum_steps: 2
+
+  - name: hybrid_large_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      model.dim: 384
+      model.depth: 8
+      model.heads: 6
+      run.batch_size: 32
+      optim.accum_steps: 2
+
+  # --- Hybrid design axis, base size (6L/256d), seed 1 --------------------
+  - name: hybrid_shared_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: shared
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+
+  - name: hybrid_nosig_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_h1_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+
+  - name: hybrid_recon03_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.3
+      objective.lambda_sigreg: 0.05
+
+  # --- Size axis, seed 2 ---------------------------------------------------
+  - name: ar_small_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      model.dim: 192
+      model.depth: 4
+      model.heads: 4
+      model.pred_dim: 96
+      model.pred_depth: 2
+      model.pred_heads: 4
+
+  - name: hybrid_small_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      model.dim: 192
+      model.depth: 4
+      model.heads: 4
+      model.pred_dim: 96
+      model.pred_depth: 2
+      model.pred_heads: 4
+
+  - name: ar_large_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      model.dim: 384
+      model.depth: 8
+      model.heads: 6
+      run.batch_size: 32
+      optim.accum_steps: 2
+
+  - name: hybrid_large_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+      model.dim: 384
+      model.depth: 8
+      model.heads: 6
+      run.batch_size: 32
+      optim.accum_steps: 2
+
+  # --- Hybrid design axis, base size (6L/256d), seed 2 --------------------
+  - name: hybrid_shared_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: shared
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+
+  - name: hybrid_nosig_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_h1_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.05
+
+  - name: hybrid_recon03_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.3
+      objective.lambda_sigreg: 0.05
+
+  # --- Base size, re-scored from scale-desynpuf's checkpoints -------------
+  - name: ar_base_s0
+    reuse_checkpoint: runs/scale-desynpuf/ar/final.pt
+
+  - name: hybrid_base_s0
+    reuse_checkpoint: runs/scale-desynpuf/hybrid/final.pt
