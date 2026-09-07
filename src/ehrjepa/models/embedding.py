@@ -27,13 +27,38 @@ distribution when it shares (or feeds, via EMA) the target weights.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import torch
 from torch import Tensor, nn
 
 from ehrjepa.data.tokenize import N_VALUE_BINS, PAD_ID
 from ehrjepa.models.layers import ScalarEncoder
 
-__all__ = ["EventEmbedding"]
+__all__ = ["CODE_INITS", "EventEmbedding", "load_code_init"]
+
+#: How ``code_emb`` starts life. ``random`` is ``N(0, 0.02)``, unchanged since the
+#: first run in this repository; ``text`` reads a table built by
+#: :mod:`ehrjepa.data.code_text` from each code's natural-language description.
+CODE_INITS: tuple[str, ...] = ("random", "text")
+
+
+def load_code_init(path: str | Path, vocab_size: int, dim: int) -> Tensor:
+    """Read a ``(vocab_size, dim)`` float32 init table, or say precisely why not."""
+    file = Path(path)
+    if not file.exists():
+        raise FileNotFoundError(
+            f"model.code_init_path={file} does not exist. Build it with "
+            f"`python -m ehrjepa.data.code_text build --cache <cache dir> --width {dim}`."
+        )
+    table = np.load(file)
+    if table.shape != (vocab_size, dim):
+        raise ValueError(
+            f"model.code_init_path={file} holds a {table.shape} table, "
+            f"but this model's code embedding is ({vocab_size}, {dim})"
+        )
+    return torch.from_numpy(np.ascontiguousarray(table, dtype=np.float32))
 
 
 class EventEmbedding(nn.Module):
@@ -53,6 +78,17 @@ class EventEmbedding(nn.Module):
         Probability, per token, that *both* time terms are zeroed during
         training. ``0.0`` (the default) never draws, so the RNG stream of a run
         that does not ask for it is unchanged.
+    code_init:
+        ``"random"`` or ``"text"``. Under ``"text"`` the table built by
+        :mod:`ehrjepa.data.code_text` is copied over ``code_emb`` *after* the
+        normal initialization has run, so the number of draws taken from the RNG
+        is identical either way and a random-init run's stream is untouched.
+    code_init_path:
+        The ``.npy`` ``"text"`` reads. Required when ``code_init="text"``.
+    freeze_code_embeddings:
+        Set ``code_emb.weight.requires_grad = False``. At 30,000 x 256 the code
+        table is 74% of a base-size model's trainable parameters, so this is a
+        parameter-count knob as much as a regularization one.
     """
 
     def __init__(
@@ -63,11 +99,17 @@ class EventEmbedding(nn.Module):
         dropout: float = 0.0,
         scalar_hidden: int | None = None,
         time_dropout: float = 0.0,
+        code_init: str = "random",
+        code_init_path: str | Path | None = None,
+        freeze_code_embeddings: bool = False,
     ) -> None:
         super().__init__()
+        if code_init not in CODE_INITS:
+            raise ValueError(f"code_init must be one of {CODE_INITS}, got {code_init!r}")
         self.vocab_size = vocab_size
         self.dim = dim
         self.time_dropout = time_dropout
+        self.code_init = code_init
         self.code_emb = nn.Embedding(vocab_size, dim, padding_idx=PAD_ID)
         self.value_bin_emb = nn.Embedding(N_VALUE_BINS + 1, dim)
         self.value_enc = ScalarEncoder(
@@ -79,6 +121,17 @@ class EventEmbedding(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
         self._init_weights()
+        # After ``_init_weights``, never instead of it: the random draws happen
+        # either way, so a ``text`` run and a ``random`` run consume the RNG
+        # identically and every recorded checksum still reproduces.
+        if code_init == "text":
+            if code_init_path is None:
+                raise ValueError("code_init='text' needs code_init_path")
+            with torch.no_grad():
+                self.code_emb.weight.copy_(load_code_init(code_init_path, vocab_size, dim))
+                self.code_emb.weight[PAD_ID].zero_()
+        if freeze_code_embeddings:
+            self.code_emb.weight.requires_grad_(False)
 
     def _init_weights(self) -> None:
         nn.init.normal_(self.code_emb.weight, std=0.02)

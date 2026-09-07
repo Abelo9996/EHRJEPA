@@ -29,6 +29,7 @@ from ehrjepa.data.tokenize import PAD_ID
 from ehrjepa.models.embedding import EventEmbedding
 from ehrjepa.models.encoder import Encoder
 from ehrjepa.models.jepa import EHRJEPAConfig
+from ehrjepa.models.pretrained import load_encoder_weights
 from ehrjepa.objectives.ar import NextCodeHead, next_code_targets
 
 __all__ = ["AROutput", "EHRAR"]
@@ -60,7 +61,13 @@ class EHRAR(nn.Module):
             raise ValueError("the autoregressive model needs model.causal=true")
         self.config = config
         self.embed = EventEmbedding(
-            config.vocab_size, config.dim, n_freq=config.n_freq, dropout=config.dropout
+            config.vocab_size,
+            config.dim,
+            n_freq=config.n_freq,
+            dropout=config.dropout,
+            code_init=config.code_init,
+            code_init_path=config.code_init_path,
+            freeze_code_embeddings=config.freeze_code_embeddings,
         )
         self.encoder = Encoder(
             config.dim,
@@ -77,6 +84,11 @@ class EHRAR(nn.Module):
             config.vocab_size,
             tied_weight=self.embed.code_emb.weight if config.tie_embeddings else None,
         )
+        if config.init_from:
+            for note in load_encoder_weights(
+                self.embed, self.encoder, config.init_from, config, "init_from"
+            ):
+                print(f"[note] model.init_from differs in {note}", flush=True)
 
     # ------------------------------------------------------------------ #
 

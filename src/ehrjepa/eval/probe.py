@@ -137,7 +137,11 @@ def load_encoder(
         state = None
     else:
         payload = torch.load(Path(checkpoint), map_location="cpu", weights_only=False)
-        config = EHRJEPAConfig.from_mapping(payload["model_config"])
+        # ``for_reload`` drops ``target_init``/``init_from``/``code_init``: every
+        # weight is about to come from this checkpoint's own ``state_dict``, and
+        # the files those name (another run's ``final.pt``, a text-init ``.npy``)
+        # need not exist on the machine doing the evaluation.
+        config = EHRJEPAConfig.from_mapping(payload["model_config"]).for_reload()
         max_len = int(payload["config"]["data"]["max_len"])
         kind = str(payload["config"].get("objective", {}).get("kind", "jepa"))
         state = payload["model"]

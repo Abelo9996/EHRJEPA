@@ -1,4 +1,4 @@
-"""``EHRJEPA``: embedding + encoder + predictor, and the two ways to make targets.
+"""``EHRJEPA``: embedding + encoder + predictor, and the three ways to make targets.
 
 The forward pass is three encoder-shaped things:
 
@@ -20,6 +20,14 @@ The forward pass is three encoder-shaped things:
     ``p_ema <- m * p_ema + (1 - m) * p`` with ``m`` on a schedule from
     ``0.996`` to ``1.0`` over training, so the target network stops moving as the
     run ends.
+    ``"frozen"``: the same second copy, loaded once from a finished run's
+    checkpoint (``model.target_init``) and never updated at all. Where ``ema``
+    asks "can a slow-moving copy of yourself be a target", this asks "can a
+    *pretrained* teacher replace the schedule entirely" -- the target is a fixed
+    function from step zero, so there is no momentum to tune and no chance of the
+    two networks collapsing together. ``model.init_from`` is the orthogonal knob:
+    it starts the *online* stack from a checkpoint, so "student initialized from
+    the teacher" and "student initialized from scratch" are separate rows.
 
 **What the target is allowed to be.** Three config flags, all defaulting to the
 behaviour above, exist because diagnostics on the first pilot grid found the task
@@ -50,19 +58,23 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 
 import torch
 from torch import Tensor, nn
 
 from ehrjepa.data.tokenize import N_VALUE_BINS
-from ehrjepa.models.embedding import EventEmbedding
+from ehrjepa.models.embedding import CODE_INITS, EventEmbedding
 from ehrjepa.models.encoder import Encoder
 from ehrjepa.models.predictor import Predictor
+from ehrjepa.models.pretrained import load_encoder_weights
 
 __all__ = ["EHRJEPA", "EHRJEPAConfig", "ema_momentum"]
 
-TARGET_MODES = ("shared", "ema")
+TARGET_MODES = ("shared", "ema", "frozen")
+
+#: The target modes that allocate a second embedding+encoder pair.
+TARGET_COPY_MODES = ("ema", "frozen")
 
 #: The per-event tensors an :class:`~ehrjepa.models.embedding.EventEmbedding` reads.
 EVENT_FIELDS = ("code_id", "value_bin", "value_z", "age", "log_delta")
@@ -105,6 +117,24 @@ class EHRJEPAConfig:
     target_mode: str = "shared"
     ema_start: float = 0.996
     ema_end: float = 1.0
+    #: ``target_mode: frozen`` only: the ``final.pt`` whose ``embed``/``encoder``
+    #: weights become the fixed teacher.
+    target_init: str | None = None
+    #: Optional: initialize the *online* ``embed``/``encoder`` from this
+    #: checkpoint instead of from scratch. Independent of ``target_init``.
+    init_from: str | None = None
+
+    #: ``random`` (the default, and the only behaviour before this existed) or
+    #: ``text``, which overwrites the code embedding table with the projected
+    #: sentence embeddings of each code's description -- see
+    #: :mod:`ehrjepa.data.code_text`.
+    code_init: str = "random"
+    #: Where the ``code_init: text`` table lives. Filled in from the cache
+    #: directory and ``dim`` by :meth:`PretrainConfig.model_config` when unset.
+    code_init_path: str | None = None
+    #: Freeze the code embedding table. At this repository's vocabulary
+    #: (30,000 x 256) that is 74% of a base-size model's trainable parameters.
+    freeze_code_embeddings: bool = False
 
     #: Reuse the embedding's age/log_delta encoders inside the predictor.
     share_time_encoders: bool = False
@@ -140,6 +170,19 @@ class EHRJEPAConfig:
     def __post_init__(self) -> None:
         if self.target_mode not in TARGET_MODES:
             raise ValueError(f"target_mode must be one of {TARGET_MODES}, got {self.target_mode!r}")
+        if self.code_init not in CODE_INITS:
+            raise ValueError(f"code_init must be one of {CODE_INITS}, got {self.code_init!r}")
+        # "frozen without a target_init" is *not* an error here: it is what
+        # :meth:`for_reload` produces, and a frozen-but-untrained teacher is the
+        # right thing for the ``random_init`` control arm. A training config that
+        # forgets the path is caught by ``PretrainConfig.model_config``.
+        if self.target_init and self.target_mode != "frozen":
+            raise ValueError(
+                f"model.target_init is only read by target_mode='frozen', "
+                f"but target_mode is {self.target_mode!r}"
+            )
+        if self.code_init == "text" and not self.code_init_path:
+            raise ValueError("code_init='text' needs model.code_init_path to name a .npy table")
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> EHRJEPAConfig:
@@ -148,6 +191,19 @@ class EHRJEPAConfig:
         if unknown:
             raise ValueError(f"unknown model config keys: {sorted(unknown)}")
         return cls(**values)  # type: ignore[arg-type]
+
+    def for_reload(self) -> EHRJEPAConfig:
+        """The same architecture, with every *initialization source* cleared.
+
+        A checkpoint records the paths it was initialized from, and rebuilding
+        that model to load its ``state_dict`` -- which is what
+        :func:`ehrjepa.eval.probe.load_encoder` does -- must not re-read them:
+        the weights are all about to be overwritten, and on an eval machine the
+        source checkpoint and the text-init ``.npy`` may not exist at all. The
+        *shape* fields, ``target_mode`` included, are kept, because the target
+        stack has to be there for a strict load to succeed.
+        """
+        return replace(self, target_init=None, init_from=None, code_init="random")
 
 
 @dataclass
@@ -175,6 +231,9 @@ class EHRJEPA(nn.Module):
             n_freq=config.n_freq,
             dropout=config.dropout,
             time_dropout=config.time_feature_dropout,
+            code_init=config.code_init,
+            code_init_path=config.code_init_path,
+            freeze_code_embeddings=config.freeze_code_embeddings,
         )
         self.encoder = Encoder(
             config.dim,
@@ -204,12 +263,28 @@ class EHRJEPA(nn.Module):
                 time_encoders=shared,
                 mask_token_time=config.mask_token_time,
             )
-        if config.target_mode == "ema":
+        if config.init_from:
+            # Before the target copy is taken, so that "frozen teacher, student
+            # initialized from the same checkpoint" starts the two identical.
+            for note in load_encoder_weights(
+                self.embed, self.encoder, config.init_from, config, "init_from"
+            ):
+                print(f"[note] model.init_from differs in {note}", flush=True)
+        if config.target_mode in TARGET_COPY_MODES:
             self.target_embed = copy.deepcopy(self.embed).requires_grad_(False)
             self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
             # Time-feature dropout is an augmentation of the *online* input; the
             # target must see the clean (or cleanly time-free) distribution.
             self.target_embed.time_dropout = 0.0
+            if config.target_init:
+                stack = (self.target_embed, self.target_encoder)
+                for note in load_encoder_weights(*stack, config.target_init, config, "target_init"):
+                    print(f"[note] model.target_init differs in {note}", flush=True)
+                # ``load_state_dict`` writes into the existing Parameters, so the
+                # flag survives -- but say so, because "the teacher is frozen" is
+                # the whole content of this target mode.
+                self.target_embed.requires_grad_(False)
+                self.target_encoder.requires_grad_(False)
         else:
             self.target_embed = None
             self.target_encoder = None
@@ -235,7 +310,13 @@ class EHRJEPA(nn.Module):
 
     @property
     def uses_ema(self) -> bool:
+        """Whether the trainer should move the target copy after each step."""
         return self.config.target_mode == "ema"
+
+    @property
+    def uses_target_copy(self) -> bool:
+        """Whether there *is* a second embedding+encoder pair -- ``ema`` or ``frozen``."""
+        return self.config.target_mode in TARGET_COPY_MODES
 
     def n_parameters(self) -> dict[str, int]:
         """Trainable parameter counts per component, plus the total."""
@@ -268,7 +349,7 @@ class EHRJEPA(nn.Module):
     # ------------------------------------------------------------------ #
 
     def embed_batch(self, batch: Mapping[str, Tensor], target_side: bool = False) -> Tensor:
-        module = self.target_embed if (target_side and self.uses_ema) else self.embed
+        module = self.target_embed if (target_side and self.uses_target_copy) else self.embed
         assert module is not None
         return module(
             batch["code_id"],
@@ -290,7 +371,7 @@ class EHRJEPA(nn.Module):
     @property
     def _target_stack(self) -> tuple[nn.Module, nn.Module]:
         """The (embedding, encoder) pair the target pass runs through."""
-        if self.uses_ema:
+        if self.uses_target_copy:
             assert self.target_embed is not None and self.target_encoder is not None
             return self.target_embed, self.target_encoder
         return self.embed, self.encoder
@@ -352,7 +433,7 @@ class EHRJEPA(nn.Module):
         when ``target.time_features`` is off, and otherwise the online tokens run
         through the online encoder under stop-gradient.
         """
-        if self.uses_ema or not self.config.target_time_features:
+        if self.uses_target_copy or not self.config.target_time_features:
             target_tokens = self.embed_batch(batch, target_side=True)
             _, encoder = self._target_stack
             return encoder(target_tokens, batch["attention_mask"]).tokens.detach()

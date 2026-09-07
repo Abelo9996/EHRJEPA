@@ -173,6 +173,20 @@ class PretrainConfig:
         values["build_predictor"] = not latent
         values["horizons"] = list(self.objective.horizons)
         values["window_horizons"] = list(self.objective.window_horizons)
+        # ``code_init: text`` names one table per (cache, width) and there is
+        # exactly one sensible place for it, so a grid cell says
+        # ``model.code_init: text`` and nothing else. An explicit
+        # ``model.code_init_path`` still wins.
+        if values.get("code_init") == "text" and not values.get("code_init_path"):
+            width = values.get("dim", EHRJEPAConfig.dim)
+            values["code_init_path"] = str(
+                Path(self.data.cache_dir) / f"code_init_text_{width}.npy"
+            )
+        if values.get("target_mode") == "frozen" and not values.get("target_init"):
+            raise ValueError(
+                "model.target_mode: frozen needs model.target_init to name the "
+                "final.pt whose encoder becomes the frozen teacher"
+            )
         return EHRJEPAConfig.from_mapping(values)
 
     def to_dict(self) -> dict[str, Any]:
