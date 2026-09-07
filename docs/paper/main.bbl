@@ -1,0 +1,187 @@
+\begin{thebibliography}{21}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Adam et~al.(2026)Adam, Chen, Laprade, Porwal, Laub, Reinertsen, Pekis,
+  and Brown]{smbstructure}
+Irsyad Adam, Zekai Chen, David Laprade, Shaun Porwal, David Laub, Erik
+  Reinertsen, Arda Pekis, and Kevin Brown.
+\newblock The patient is not a moving document: A world model training paradigm
+  for longitudinal {EHR}.
+\newblock \emph{arXiv preprint arXiv:2601.22128}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2601.22128}.
+\newblock Introduces {SMB-Structure}.
+
+\bibitem[Arnrich et~al.(2024)Arnrich, Choi, Fries, McDermott, Oh, Pollard,
+  Shah, Steinberg, Wornow, and van~de Water]{meds}
+Bert Arnrich, Edward Choi, Jason Fries, Matthew McDermott, Jungwoo Oh, Tom
+  Pollard, Nigam Shah, Ethan Steinberg, Michael Wornow, and Robin van~de Water.
+\newblock Medical event data standard ({MEDS}): Facilitating machine learning
+  for health.
+\newblock In \emph{ICLR 2024 Workshop on Learning from Time Series for Health},
+  2024.
+\newblock URL \url{https://openreview.net/forum?id=IsHy2ebjIG}.
+
+\bibitem[Assran et~al.(2023)Assran, Duval, Misra, Bojanowski, Vincent, Rabbat,
+  LeCun, and Ballas]{ijepa}
+Mahmoud Assran, Quentin Duval, Ishan Misra, Piotr Bojanowski, Pascal Vincent,
+  Michael Rabbat, Yann LeCun, and Nicolas Ballas.
+\newblock Self-supervised learning from images with a joint-embedding
+  predictive architecture.
+\newblock \emph{arXiv preprint arXiv:2301.08243}, 2023.
+\newblock URL \url{https://arxiv.org/abs/2301.08243}.
+
+\bibitem[Assran et~al.(2025)Assran, Bardes, Fan, Garrido, Howes, Komeili,
+  et~al.]{vjepa2}
+Mido Assran, Adrien Bardes, David Fan, Quentin Garrido, Russell Howes, Mojtaba
+  Komeili, et~al.
+\newblock {V-JEPA} 2: Self-supervised video models enable understanding,
+  prediction and planning.
+\newblock \emph{arXiv preprint arXiv:2506.09985}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2506.09985}.
+
+\bibitem[Balestriero and LeCun(2025)]{lejepa}
+Randall Balestriero and Yann LeCun.
+\newblock {LeJEPA}: Provable and scalable self-supervised learning without the
+  heuristics.
+\newblock \emph{arXiv preprint arXiv:2511.08544}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2511.08544}.
+
+\bibitem[Chemeris et~al.(2026)Chemeris, Jin, and Balestriero]{lenepa}
+Alexander Chemeris, Ming Jin, and Randall Balestriero.
+\newblock {LeNEPA}: No-augmentation next-latent prediction for time-series
+  representation learning.
+\newblock \emph{arXiv preprint arXiv:2607.00958}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2607.00958}.
+\newblock KDD 2026 MILETS workshop.
+
+\bibitem[Ennadir et~al.(2025)Ennadir, Golkar, and Sarra]{tsjepa}
+Sofiane Ennadir, Siavash Golkar, and Leopoldo Sarra.
+\newblock Joint embeddings go temporal.
+\newblock \emph{arXiv preprint arXiv:2509.25449}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2509.25449}.
+
+\bibitem[Fallahpour et~al.(2024)Fallahpour, Alinoori, Ye, Cao, Afkanpour, and
+  Krishnan]{ehrmamba}
+Adibvafa Fallahpour, Mahshid Alinoori, Wenqian Ye, Xu~Cao, Arash Afkanpour, and
+  Amrit Krishnan.
+\newblock {EHRMamba}: Towards generalizable and scalable foundation models for
+  electronic health records.
+\newblock \emph{arXiv preprint arXiv:2405.14567}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2405.14567}.
+
+\bibitem[Guo et~al.(2026)Guo, Arciniegas, Lee, Yan, Tomlinson, Fries, and
+  Sung]{tokenization}
+Lin~Lawrence Guo, Santiago~Eduardo Arciniegas, Joseph~Jihyung Lee, Adam~Paul
+  Yan, George Tomlinson, Jason Fries, and Lillian Sung.
+\newblock Tokenization tradeoffs in structured {EHR} foundation models.
+\newblock \emph{arXiv preprint arXiv:2603.15644}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2603.15644}.
+
+\bibitem[Jeanselme et~al.(2025)Jeanselme, Jing, Kashyap, Pang, Pollet, Choi,
+  and Joshi]{fomoh}
+Vincent Jeanselme, Zilin Jing, Aparajita Kashyap, Chao Pang, Florent Pollet,
+  Young~Sang Choi, and Shalmali Joshi.
+\newblock {FoMoH}: A clinically meaningful foundation model evaluation for
+  structured electronic health records.
+\newblock \emph{arXiv preprint arXiv:2505.16941}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2505.16941}.
+
+\bibitem[Li et~al.(2025)Li, Huang, Li, Malach, Susskind, Thilak, and
+  Littwin]{salt}
+Xianhang Li, Chen Huang, Chun-Liang Li, Eran Malach, Josh Susskind, Vimal
+  Thilak, and Etai Littwin.
+\newblock Rethinking {JEPA}: Compute-efficient video {SSL} with frozen
+  teachers.
+\newblock \emph{arXiv preprint arXiv:2509.24317}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2509.24317}.
+
+\bibitem[Oufattole et~al.(2024)Oufattole, Bergamaschi, Kolo, Jeong, Gaggin,
+  Stultz, and McDermott]{medstab}
+Nassim Oufattole, Teya Bergamaschi, Aleksia Kolo, Hyewon Jeong, Hanna Gaggin,
+  Collin~M. Stultz, and Matthew B.~A. McDermott.
+\newblock {MEDS-Tab}: Automated tabularization and baseline methods for {MEDS}
+  datasets.
+\newblock \emph{arXiv preprint arXiv:2411.00200}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2411.00200}.
+
+\bibitem[Pang et~al.(2024)Pang, Jiang, Pavinkurve, Kalluri, Minto, Patterson,
+  Zhang, Hripcsak, G{\"u}rsoy, Elhadad, and Natarajan]{cehrgpt}
+Chao Pang, Xinzhuo Jiang, Nishanth~Parameshwar Pavinkurve, Krishna~S. Kalluri,
+  Elise~L. Minto, Jason Patterson, Linying Zhang, George Hripcsak, Gamze
+  G{\"u}rsoy, No{\'e}mie Elhadad, and Karthik Natarajan.
+\newblock {CEHR-GPT}: Generating electronic health records with chronological
+  patient timelines.
+\newblock \emph{arXiv preprint arXiv:2402.04400}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2402.04400}.
+
+\bibitem[Renc et~al.(2024)Renc, Jia, Samir, Was, Li, Bates, and Sitek]{ethos}
+Pawel Renc, Yugang Jia, Anthony~E. Samir, Jaroslaw Was, Quanzheng Li, David~W.
+  Bates, and Arkadiusz Sitek.
+\newblock Zero shot health trajectory prediction using transformer.
+\newblock \emph{arXiv preprint arXiv:2407.21124}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2407.21124}.
+\newblock Introduces {ETHOS}.
+
+\bibitem[Shmatko et~al.(2025)Shmatko, Jung, Gaurav, Brunak, Mortensen, Birney,
+  Fitzgerald, and Gerstung]{delphi2m}
+Artem Shmatko, Alexander~Wolfgang Jung, Kumar Gaurav, S{\o}ren Brunak,
+  Laust~Hvas Mortensen, Ewan Birney, Tom Fitzgerald, and Moritz Gerstung.
+\newblock Learning the natural history of human disease with generative
+  transformers.
+\newblock \emph{Nature}, 647\penalty0 (8088):\penalty0 248--256, 2025.
+\newblock \doi{10.1038/s41586-025-09529-3}.
+\newblock Introduces {Delphi-2M}.
+
+\bibitem[Steinberg et~al.(2023)Steinberg, Fries, Xu, and Shah]{motor}
+Ethan Steinberg, Jason Fries, Yizhe Xu, and Nigam Shah.
+\newblock {MOTOR}: A time-to-event foundation model for structured medical
+  records.
+\newblock \emph{arXiv preprint arXiv:2301.03150}, 2023.
+\newblock URL \url{https://arxiv.org/abs/2301.03150}.
+
+\bibitem[Wornow et~al.(2023)Wornow, Thapa, Steinberg, Fries, and Shah]{ehrshot}
+Michael Wornow, Rahul Thapa, Ethan Steinberg, Jason~A. Fries, and Nigam~H.
+  Shah.
+\newblock {EHRSHOT}: An {EHR} benchmark for few-shot evaluation of foundation
+  models.
+\newblock \emph{arXiv preprint arXiv:2307.02028}, 2023.
+\newblock URL \url{https://arxiv.org/abs/2307.02028}.
+
+\bibitem[Wornow et~al.(2024)Wornow, Bedi, Hernandez, Steinberg, Fries, R{\'e},
+  Koyejo, and Shah]{contextclues}
+Michael Wornow, Suhana Bedi, Miguel Angel~Fuentes Hernandez, Ethan Steinberg,
+  Jason~Alan Fries, Christopher R{\'e}, Sanmi Koyejo, and Nigam~H. Shah.
+\newblock Context clues: Evaluating long context models for clinical prediction
+  tasks on {EHRs}.
+\newblock \emph{arXiv preprint arXiv:2412.16178}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2412.16178}.
+
+\bibitem[Xu et~al.(2024)Xu, Gallifant, Johnson, and McDermott]{aces}
+Justin Xu, Jack Gallifant, Alistair E.~W. Johnson, and Matthew B.~A. McDermott.
+\newblock {ACES}: Automatic cohort extraction system for event-stream datasets.
+\newblock \emph{arXiv preprint arXiv:2406.19653}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2406.19653}.
+\newblock ICLR 2025.
+
+\bibitem[Yang et~al.(2026)Yang, Arora, Zhang, Abed, Kim, Choudhary, and
+  Kamaleswaran]{clinjepa}
+Yixuan Yang, Mehak Arora, Ryan Zhang, Baraa Abed, Junseob Kim, Tilendra
+  Choudhary, and Rishikesan Kamaleswaran.
+\newblock {Clin-JEPA}: A multi-phase co-training framework for joint-embedding
+  predictive pretraining on {EHR} patient trajectories.
+\newblock \emph{arXiv preprint arXiv:2605.10840}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2605.10840}.
+
+\bibitem[Zhang et~al.(2025)Zhang, Liu, Usuyama, Wong, Naumann, and
+  Poon]{ehrscaling}
+Sheng Zhang, Qin Liu, Naoto Usuyama, Cliff Wong, Tristan Naumann, and Hoifung
+  Poon.
+\newblock Exploring scaling laws for {EHR} foundation models.
+\newblock \emph{arXiv preprint arXiv:2505.22964}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2505.22964}.
+
+\end{thebibliography}

@@ -1,0 +1,79 @@
+% Evaluation protocol: anchor, history window, label window, models, controls.
+\begin{tikzpicture}[
+  font=\small,
+  fl/.style   = {-{Latex[length=1.8mm]}, thick},
+  box/.style  = {draw, rounded corners=2pt, align=center, inner sep=3pt,
+                 minimum height=10mm, fill=white},
+  ctl/.style  = {box, fill=black!6, draw=black!50, dashed},
+  res/.style  = {box, fill=red!5,  draw=red!45},
+  lbl/.style  = {font=\scriptsize, inner sep=1.5pt},
+]
+
+% ================= timeline ============================================
+\draw[fl] (0mm,0) -- (152mm,0) node[right, lbl] {time};
+
+% history band
+\fill[blue!8]  (8mm,2mm) rectangle (74mm,11mm);
+\draw[blue!45] (8mm,2mm) rectangle (74mm,11mm);
+\node[lbl, align=center] at (41mm,6.5mm)
+  {history: the last $L$ events \emph{strictly before} $t$};
+
+% label band
+\fill[red!8]  (74mm,2mm) rectangle (140mm,11mm);
+\draw[red!45] (74mm,2mm) rectangle (140mm,11mm);
+\node[lbl, align=center] at (107mm,6.5mm) {label window $(t,\;t{+}H]$};
+
+% anchor
+\draw[very thick] (74mm,-4mm) -- (74mm,14mm);
+\node[lbl, above] at (74mm,14mm) {anchor $t$};
+
+% event ticks
+\foreach \x in {11,17,22,30,37,43,50,56,62,70} {\draw[black!55] (\x mm,-1.4mm) -- (\x mm,1.4mm);}
+\foreach \x in {79,86,94,101,112,122,133}      {\draw[red!55]   (\x mm,-1.4mm) -- (\x mm,1.4mm);}
+
+% notes under the bands
+\node[lbl, align=center, anchor=north] at (41mm,-3mm)
+  {$\geq 32$ prior events; one anchor per subject,\\[-1pt]
+   drawn by a seeded hash of the subject id;\\[-1pt]
+   strictly before \texttt{MEDS\_DEATH}};
+\node[lbl, align=center, anchor=north] at (107mm,-3mm)
+  {$H = 365$\,d, or $30$\,d for \texttt{readmission\_30d};\\[-1pt]
+   full follow-up required, or death inside it;\\[-1pt]
+   \texttt{new\_dx} additionally requires zero prior cases};
+
+% ================= models ==============================================
+\node[box, text width=32mm] (feat) at (22mm,-30mm)
+  {count features\\[-1pt]{\scriptsize 5 blocks $\times$ 30k codes,\\[-2pt]
+   pruned at $\mathrm{df}\geq 10$}};
+\node[box, text width=34mm] (enc)  at (74mm,-30mm)
+  {frozen encoder\\[-1pt]{\scriptsize pooled, \texttt{auto@final}:\\[-2pt]
+   \texttt{mean} if bidirectional, \texttt{last} if causal}};
+\node[ctl, text width=34mm] (ri)   at (128mm,-30mm)
+  {\texttt{random\_init} control\\[-1pt]{\scriptsize same architecture,\\[-2pt]
+   same pooling, untrained}};
+
+\node[box, text width=32mm] (base)  at (22mm,-46mm)
+  {\texttt{lr} (TF-IDF $+$ L2)\\[-1pt]\texttt{gbm} (XGBoost)};
+\node[box, text width=34mm] (probe) at (74mm,-46mm)
+  {L2 logistic probe\\[-1pt]{\scriptsize $C$ tuned on \texttt{tuning};\\[-2pt]
+   $k=32,\,128,\,\mathrm{all}$}};
+\node[ctl, text width=34mm] (rprobe) at (128mm,-46mm)
+  {the same probe};
+
+\node[res, text width=98mm] (ci) at (74mm,-62mm)
+  {AUROC on the shared seeded 3{,}000-subject \texttt{held\_out} cut\\[-1pt]
+   {\scriptsize 200 bootstrap resamples over subjects, 95\% percentile intervals;
+    paired bootstrap per model pair}};
+
+% ================= edges ===============================================
+\draw[fl] (8mm,2mm)  -- ++(-4mm,0) |- (feat.west);
+\draw[fl] (74mm,-4mm) -- ++(0,-3mm) -- (enc.north);
+\draw[fl] (enc.north) ++(0,4mm) -| (ri.north);
+\draw[fl] (feat)  -- (base);
+\draw[fl] (enc)   -- (probe);
+\draw[fl] (ri)    -- (rprobe);
+\draw[fl] (base.south)   |- (ci.west);
+\draw[fl] (probe)        -- (ci);
+\draw[fl] (rprobe.south) |- (ci.east);
+
+\end{tikzpicture}

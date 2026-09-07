@@ -1,0 +1,72 @@
+% Architecture: event embedding -> context encoder -> predictor, with the
+% stop-gradient target branch and the three loss terms.
+% Requires: tikz + arrows.meta.  Wrap in \resizebox to fit \textwidth.
+\begin{tikzpicture}[
+  font=\small,
+  box/.style   = {draw, rounded corners=2pt, align=center, inner sep=3.5pt,
+                  minimum height=11mm, fill=white},
+  data/.style  = {box, fill=black!4},
+  net/.style   = {box, fill=blue!7, draw=blue!45},
+  frz/.style   = {box, fill=black!7, draw=black!50, dashed},
+  loss/.style  = {box, fill=red!6, draw=red!45},
+  fl/.style    = {-{Latex[length=2mm]}, thick},
+  sg/.style    = {-{Latex[length=2mm]}, thick, dashed, draw=black!55},
+  lbl/.style   = {font=\scriptsize\itshape, inner sep=1pt},
+]
+
+% ---------------- shared trunk -----------------------------------------
+\node[data, text width=23mm] (ev)  at (0mm,   0mm)
+  {MEDS events\\[-1pt]{\scriptsize $(\mathrm{code}_i, v_i, t_i)$}};
+
+\node[data, text width=32mm] (emb) at (35mm,  0mm)
+  {\textsc{EventEmbedding}\\[-1pt]{\scriptsize code $+$ value-bin $+$\\[-2pt]
+   Fourier$(v_z,\ \mathrm{age},\ \log\Delta)$}};
+
+% ---------------- online branch (top) ----------------------------------
+\node[net, text width=30mm]  (ctx) at (78mm,  17mm)
+  {context encoder $f_\theta$\\[-1pt]{\scriptsize RoPE, pre-norm, SwiGLU}};
+
+\node[net, text width=28mm]  (prd) at (116mm, 17mm)
+  {predictor $g_\phi$\\[-1pt]{\scriptsize \texttt{[MASK]} $+$ target\\[-2pt]
+   time features}};
+
+\node[data, text width=19mm] (ph)  at (147mm, 17mm)
+  {$\hat z_j$\\[-1pt]{\scriptsize predicted}};
+
+% ---------------- target branch (bottom) -------------------------------
+\node[frz, text width=30mm]  (tgt) at (78mm, -17mm)
+  {target encoder $f_{\bar\theta}$\\[-1pt]{\scriptsize EMA or shared, stop-grad}};
+
+\node[data, text width=28mm] (tz)  at (116mm,-17mm)
+  {$z_j = \mathrm{LN}\!\left(f_{\bar\theta}(x)_j\right)$\\[-1pt]
+   {\scriptsize layer-normed targets}};
+
+% ---------------- loss --------------------------------------------------
+\node[loss, text width=45mm] (ls) at (183mm, 0mm)
+  {$\mathcal{L} = \lambda_{\mathrm{pred}}\,\mathrm{SmoothL1}(\hat z, z)$\\[2pt]
+   $+\ \lambda_{\mathrm{sig}}\,\mathrm{SIGReg}(h) $\\[2pt]
+   $+\ \lambda_{\mathrm{recon}}\,\mathcal{L}_{\mathrm{code}}$};
+
+% ---------------- edges -------------------------------------------------
+\draw[fl] (ev) -- (emb);
+\draw[fl] (emb.east) -- ++(5mm,0) |- (ctx.west);
+\draw[sg] (emb.east) -- ++(5mm,0) |- (tgt.west);
+\draw[fl] (ctx) -- (prd);
+\draw[fl] (prd) -- (ph);
+\draw[fl] (tgt) -- (tz);
+\draw[fl] (ph.east) -- ++(6mm,0) |- (ls.west);
+\draw[fl] (tz.east) -- ++(6mm,0) |- (ls.west);
+
+% EMA feedback: online weights -> target weights, around the right side
+\draw[sg] (ctx.north) -- ++(0,7mm) -- ++(-42mm,0)
+          node[lbl, above, midway] {$\bar\theta \leftarrow m\,\bar\theta + (1-m)\,\theta$}
+          -- ++(0,-51mm) -- (tgt.west);
+
+% code-reconstruction tap
+\draw[fl, draw=red!55] (ph.south) -- ++(0,-6mm) -- ++(-14mm,0)
+  node[lbl, left, align=right, text=red!65]
+  {tied code head $\Rightarrow \mathcal{L}_{\mathrm{code}}$};
+
+\node[lbl, below=1mm of tgt] {stop-gradient};
+
+\end{tikzpicture}

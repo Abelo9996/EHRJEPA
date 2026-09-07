@@ -1,0 +1,92 @@
+% The five objective families, drawn on a common 12-token strip.
+% Blue = observed context, red = predicted / supervised, grey dashed = masked.
+\begin{tikzpicture}[
+  font=\small,
+  tok/.style  = {draw, minimum width=4.4mm, minimum height=4.4mm, inner sep=0pt,
+                 rounded corners=0.6pt},
+  ctx/.style  = {tok, fill=blue!14, draw=blue!50},
+  tgt/.style  = {tok, fill=red!14,  draw=red!50},
+  msk/.style  = {tok, fill=black!8, draw=black!45, dashed},
+  nul/.style  = {tok, fill=white,   draw=black!25},
+  ttl/.style  = {font=\small\bfseries, anchor=north west, text width=54mm},
+  sub/.style  = {font=\scriptsize, anchor=north west, text width=54mm,
+                 text=black!65, inner sep=1pt},
+  rhs/.style  = {font=\scriptsize, anchor=west, text width=44mm},
+  ar/.style   = {-{Latex[length=1.5mm]}, thin, draw=red!70},
+  arb/.style  = {-{Latex[length=1.5mm]}, thin, draw=black!60},
+]
+
+\newcommand{\strip}[2]{%  #1 = node prefix, #2 = comma list of styles
+  \foreach \s [count=\i from 0] in {#2} {
+    \node[\s] (#1\i) at (\i*5mm, 0) {};
+  }%
+}
+
+% ======================= (a) masked-span latent JEPA ===================
+\begin{scope}
+  \node[ttl] (ta) at (-60mm,  5mm) {(a) masked-span latent JEPA};
+  \node[sub, below=0.6mm of ta.south west, anchor=north west]
+    {bidirectional encoder; predict the masked spans in latent space};
+  \strip{a}{ctx,ctx,msk,msk,ctx,ctx,ctx,msk,msk,ctx,ctx,ctx}
+  \foreach \i in {2,3,7,8} {
+    \node[tgt] (at\i) at (\i*5mm,-9mm) {};
+    \draw[ar] (a\i.south) -- (at\i.north);
+  }
+  \node[rhs, text=red!75] at (64mm, -4.5mm) {$\hat z_j \to z_j$, smooth $L_1$};
+\end{scope}
+
+% ======================= (b) causal next-latent ========================
+\begin{scope}[yshift=-27mm]
+  \node[ttl] (tb) at (-60mm,  5mm) {(b) causal next-latent JEPA};
+  \node[sub, below=0.6mm of tb.south west, anchor=north west]
+    {one term at \emph{every} position, horizons $k \in \{1,4,16\}$};
+  \strip{b}{ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx}
+  \foreach \i [evaluate=\i as \j using int(\i+1)] in {0,...,10} {
+    \draw[ar] (b\i.north) to[bend left=34] (b\j.north);
+  }
+  \draw[ar, draw=red!45] (b1.north) to[bend left=52] (b5.north);
+  \draw[ar, draw=red!28] (b3.north) to[bend left=62] (b11.north);
+  \node[rhs, text=red!75] at (64mm, 0mm) {$h_i \to z_{i+k}$, one MLP head per $k$};
+\end{scope}
+
+% ======================= (c) window-level ==============================
+\begin{scope}[yshift=-54mm]
+  \node[ttl] (tc) at (-60mm,  5mm) {(c) window-level JEPA};
+  \node[sub, below=0.6mm of tc.south west, anchor=north west]
+    {8 anchors per window; the target is the mean latent over
+     $(t_a,\,t_a{+}H]$, $H \in \{30, 365\}$ days};
+  \strip{c}{ctx,ctx,ctx,ctx,tgt,tgt,tgt,tgt,tgt,nul,nul,nul}
+  \draw[very thick] (17.5mm,-4.5mm) -- (17.5mm,4.5mm);
+  \node[font=\scriptsize, anchor=south] at (17.5mm, 8.5mm) {anchor $t_a$};
+  \draw[decorate, decoration={brace, amplitude=1.4mm}, draw=red!60]
+    (42mm,5.0mm) -- (18mm,5.0mm);
+  \node[rhs, text=red!75] at (64mm, 0mm) {$h_{a-1} \to \bar z_{(t_a,\,t_a+H]}$};
+\end{scope}
+
+% ======================= (d) AR ========================================
+\begin{scope}[yshift=-81mm]
+  \node[ttl] (td) at (-60mm,  5mm) {(d) next-code AR};
+  \node[sub, below=0.6mm of td.south west, anchor=north west]
+    {discrete target; output projection tied to the code embedding table};
+  \strip{d}{ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx}
+  \foreach \i [evaluate=\i as \j using int(\i+1)] in {0,...,10} {
+    \draw[arb] (d\i.north) to[bend left=34] (d\j.north);
+  }
+  \node[rhs] at (64mm, 0mm) {$h_i \to \mathrm{code}_{i+1}$, cross-entropy};
+\end{scope}
+
+% ======================= (e) hybrid ====================================
+\begin{scope}[yshift=-106mm]
+  \node[ttl] (te) at (-60mm,  5mm) {(e) hybrid $=$ (b) $+$ (d)};
+  \node[sub, below=0.6mm of te.south west, anchor=north west]
+    {\texttt{nextlatent\_h1416\_recon}: both terms through the same trunk};
+  \strip{e}{ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx,ctx}
+  \foreach \i [evaluate=\i as \j using int(\i+1)] in {0,...,10} {
+    \draw[ar]  (e\i.north) to[bend left=34]  (e\j.north);
+    \draw[arb] (e\i.south) to[bend right=34] (e\j.south);
+  }
+  \node[rhs, text=red!75] at (64mm,  2.5mm) {latent $\hat z_{i+k}$ (red)};
+  \node[rhs]              at (64mm, -2.5mm) {$+\ \lambda_{\mathrm{recon}}\cdot$ code CE (black)};
+\end{scope}
+
+\end{tikzpicture}
