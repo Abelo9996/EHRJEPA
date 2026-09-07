@@ -133,7 +133,8 @@ class EHRJEPAConfig:
     #: directory and ``dim`` by :meth:`PretrainConfig.model_config` when unset.
     code_init_path: str | None = None
     #: Freeze the code embedding table. At this repository's vocabulary
-    #: (30,000 x 256) that is 74% of a base-size model's trainable parameters.
+    #: (30,000 x 256) that is 7.68M parameters, 58% of a base-size hybrid's
+    #: 13.21M trainable ones and 61% of the AR model's 12.67M.
     freeze_code_embeddings: bool = False
 
     #: Reuse the embedding's age/log_delta encoders inside the predictor.

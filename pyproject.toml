@@ -45,6 +45,14 @@ eval = [
   "es-aces>=0.7,<0.8",
   "xgboost>=2.0",
 ]
+# Building the `model.code_init: text` table (ehrjepa.data.code_text). Only the
+# `build` subcommand needs these: describing the vocabulary, and *training* from
+# a table someone else built, are stdlib + numpy. `icd9cms` is a pure-data
+# package carrying the ICD-9-CM category titles the CMS billable-leaf list omits.
+codetext = [
+  "sentence-transformers>=3.0",
+  "icd9cms>=0.2",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",

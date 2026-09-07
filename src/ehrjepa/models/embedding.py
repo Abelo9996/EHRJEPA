@@ -87,8 +87,9 @@ class EventEmbedding(nn.Module):
         The ``.npy`` ``"text"`` reads. Required when ``code_init="text"``.
     freeze_code_embeddings:
         Set ``code_emb.weight.requires_grad = False``. At 30,000 x 256 the code
-        table is 74% of a base-size model's trainable parameters, so this is a
-        parameter-count knob as much as a regularization one.
+        table is 7.68M parameters -- 58% of a base-size hybrid's 13.21M trainable
+        ones -- so this is a parameter-count knob as much as a regularization
+        one.
     """
 
     def __init__(

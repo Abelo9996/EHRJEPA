@@ -44,6 +44,13 @@ ENV/
 # aggregates over a public synthetic dataset and are the point of docs/.
 !docs/experiments/**
 
+# The text-init embedding tables (ehrjepa.data.code_text) are a derived artifact
+# of a public code table and a public sentence model: ~30 MB per width, rebuilt
+# in a couple of minutes by `python -m ehrjepa.data.code_text build`. Their
+# coverage JSON is small, is the thing worth reviewing, and is committed under
+# docs/experiments/.
+code_init_text_*.npy
+
 # Runs, checkpoints, logs
 checkpoints/
 runs/
