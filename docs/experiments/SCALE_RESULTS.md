@@ -53,13 +53,21 @@ the untrained embedding and encoder, and neither the AR head nor the
 `nextlatent` heads exist at initialisation). `random_init@jepa_ema` at 200M is
 0.6742.
 
+The `hybrid`/`ar` 1B rows above (mean 0.7356 / 0.7237) are seed 0 only, as
+their `scale` column implies for every row in this table; the 3-seed means at
+1B (0.7363 / 0.7251) are in the "Scaling" and "1B seed replication" sections
+below.
+
 ## Scaling: ar vs. hybrid, 48M → 200M → 1B
+
+The 1B row below is the 3-seed mean (seeds 0, 1, 2); see the seed-replication
+table further down for per-seed values, per-task std, and overlap.
 
 | tokens | ar mean AUROC | ar readmission_30d | hybrid mean AUROC | hybrid readmission_30d |
 |---|---|---|---|---|
 | 48M | 0.7205 | 0.6946 | 0.7287 | 0.6985 |
 | 200M | 0.7304 | 0.6674 | 0.7328 | 0.6930 |
-| 1B | 0.7237 | 0.6490 | **0.7356** | **0.6874** |
+| 1B (3-seed mean) | 0.7251 | 0.6637 | **0.7363** | **0.6853** |
 
 ## Figure
 
@@ -74,27 +82,56 @@ is a number not already committed in one of those tables. Regenerate with:
 python scripts/plot_scale.py
 ```
 
+## 1B seed replication
+
+`scale1b-seeds-desynpuf` (seeds 1 and 2, `ar` and `hybrid`) plus the seed-0
+rows from `scale1b-desynpuf` give three seeds per cell at 1B tokens. Std is
+sample std (n=3, ddof=1). "Overlap" is whether the ar and hybrid min-max
+ranges across the three seeds intersect for that task.
+
+| task | ar s0 | ar s1 | ar s2 | ar mean | ar std | hybrid s0 | hybrid s1 | hybrid s2 | hybrid mean | hybrid std | seed ranges overlap |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| inpatient_365d | 0.7506 | 0.7410 | 0.7441 | 0.7452 | 0.0049 | 0.7553 | 0.7491 | 0.7556 | 0.7533 | 0.0037 | yes |
+| mortality_365d | 0.6028 | 0.6031 | 0.5933 | 0.5997 | 0.0056 | 0.5767 | 0.5862 | 0.5969 | 0.5866 | 0.0101 | yes |
+| new_dx_365d/ckd | 0.7586 | 0.7584 | 0.7581 | 0.7584 | 0.0003 | 0.7741 | 0.7717 | 0.7752 | 0.7737 | 0.0018 | no |
+| new_dx_365d/copd | 0.7629 | 0.7738 | 0.7656 | 0.7674 | 0.0057 | 0.7781 | 0.7798 | 0.7760 | 0.7780 | 0.0019 | no (gap 0.0022) |
+| new_dx_365d/diabetes | 0.7618 | 0.7639 | 0.7589 | 0.7615 | 0.0025 | 0.7779 | 0.7787 | 0.7784 | 0.7783 | 0.0004 | no |
+| new_dx_365d/heart_failure | 0.7804 | 0.7796 | 0.7787 | 0.7796 | 0.0009 | 0.7997 | 0.8015 | 0.7950 | 0.7987 | 0.0034 | no |
+| readmission_30d | 0.6490 | 0.6742 | 0.6679 | 0.6637 | 0.0131 | 0.6874 | 0.6846 | 0.6840 | 0.6853 | 0.0018 | no |
+
+Ranges do not overlap between `ar` and `hybrid` on four of seven tasks (ckd,
+diabetes, heart_failure, readmission_30d); `mortality_365d` and
+`inpatient_365d` overlap; `new_dx_365d/copd` does not overlap by the min-max
+definition above, with the smallest gap of any non-overlapping task (ar max
+0.7738 vs. hybrid min 0.7760, a gap of 0.0022).
+
 ## Findings
 
-- `ar` mean AUROC: 0.7205 (48M) → 0.7304 (200M) → 0.7237 (1B). It does not
-  improve from 200M to 1B (-0.0067) and drops on four tasks over that step:
-  `new_dx_365d/copd` (0.7747 → 0.7629, -0.0118), `new_dx_365d/diabetes`
-  (0.7714 → 0.7618, -0.0096), `new_dx_365d/heart_failure`
-  (0.7908 → 0.7804, -0.0104), `readmission_30d` (0.6674 → 0.6490, -0.0184).
-- `hybrid` mean AUROC improves at every step: 0.7287 (48M) → 0.7328 (200M) →
-  0.7356 (1B), +0.0041 then +0.0028.
-- At 1B, `hybrid` leads `ar` on six of the seven tasks — every task except
-  `mortality_365d` — by 0.47 to 3.84 AUROC points: `inpatient_365d` +0.47,
-  `new_dx_365d/ckd` +1.55, `new_dx_365d/copd` +1.52, `new_dx_365d/diabetes`
-  +1.61, `new_dx_365d/heart_failure` +1.93, `readmission_30d` +3.84.
-  `ar` leads on `mortality_365d` (0.6028 vs. 0.5767, +2.61 points).
-- `hybrid` at 1B (0.7356 mean AUROC) is the highest mean AUROC of any cell in
-  this table, above `gbm` (0.7261) and `lr` (0.6949).
+- `ar` mean AUROC (3-seed mean at 1B): 0.7205 (48M) → 0.7304 (200M) → 0.7251
+  (1B). It does not improve from 200M to 1B (-0.0053) and drops on six of
+  seven tasks over that step — every task except `mortality_365d`
+  (0.5946 → 0.5997, +0.0051): `inpatient_365d` (0.7515 → 0.7452, -0.0063),
+  `new_dx_365d/ckd` (0.7624 → 0.7584, -0.0040), `new_dx_365d/copd`
+  (0.7747 → 0.7674, -0.0073), `new_dx_365d/diabetes` (0.7714 → 0.7615,
+  -0.0099), `new_dx_365d/heart_failure` (0.7908 → 0.7796, -0.0112),
+  `readmission_30d` (0.6674 → 0.6637, -0.0037).
+- `hybrid` mean AUROC (3-seed mean at 1B) improves at every step: 0.7287
+  (48M) → 0.7328 (200M) → 0.7363 (1B), +0.0041 then +0.0035.
+- At 1B (3-seed means), `hybrid` leads `ar` on six of the seven tasks — every
+  task except `mortality_365d` — by 0.81 to 2.16 AUROC points:
+  `inpatient_365d` +0.81, `new_dx_365d/ckd` +1.53, `new_dx_365d/copd` +1.05,
+  `new_dx_365d/diabetes` +1.68, `new_dx_365d/heart_failure` +1.92,
+  `readmission_30d` +2.16. `ar` leads on `mortality_365d` (0.5997 vs. 0.5866,
+  +1.31 points).
+- `hybrid` at 1B (0.7363 mean AUROC, 3-seed mean) is the highest mean AUROC
+  of any cell in this table, above `gbm` (0.7261) and `lr` (0.6949).
 - `recon_only` and `jepa_ema` were run through 200M only (0.7190 and 0.6985
   mean AUROC, gains +0.0448 and +0.0243) and have no 1B row.
-- Every 200M and 1B row above is a single seed (seed 0). A seed-replication
-  grid at 1B (`scale1b-seeds-desynpuf`: seeds 1 and 2 for `ar` and `hybrid`)
-  is running now; its rows are not in this table.
+- 1B is now three seeds per cell (`ar`, `hybrid`); see the seed-replication
+  table above. 200M and 48M rows above remain single-seed (seed 0), except
+  that the pilot grid separately reseeded `ar` and `hybrid` at 48M (see
+  `PILOT_RESULTS.md`, grid 5) — `recon_only` and `jepa_ema` are single-seed
+  at every budget they were run at.
 
 ## Caveats
 
@@ -109,7 +146,11 @@ python scripts/plot_scale.py
   12,665,104 (62%). Both are down from 74% at the pilot's 4L/192d scale —
   encoder and predictor capacity grows faster than the embedding table as
   depth and width scale, at a fixed 30,000-code vocabulary.
-- **Single seed at 1B.** Both `ar` and `hybrid` at 1B are seed 0 only; the
-  200M-to-1B comparisons above rest on one training run per cell per budget.
-  `scale1b-seeds-desynpuf` (seeds 1, 2) is running now and is not yet
-  reflected here.
+- **Single seed at 200M.** Every 200M row (`ar`, `hybrid`, `recon_only`,
+  `jepa_ema`) is seed 0 only; the 48M-to-200M step rests on one training run
+  per cell. `recon_only` and `jepa_ema` are also single-seed at 48M — neither
+  has a seed-replication grid, and neither has been run at 1B.
+- **1B is three seeds per cell for `ar` and `hybrid`,** but the seed-0-only
+  200M comparison point they are scaled from is not. A "200M → 1B" step is
+  therefore comparing a single run at 200M to a three-seed mean at 1B, not a
+  matched-seed-count comparison at both ends.

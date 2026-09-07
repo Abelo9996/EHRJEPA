@@ -65,10 +65,11 @@ project. Every number in it comes from a run recorded in the project
 repository at a named commit. All pretraining is on a single synthetic,
 claims-derived source (CMS DE-SynPUF) with no laboratory values; no
 experiment on MIMIC-IV or EHRSHOT has been run. The largest token budget
-reported (1B) rests on one training seed per cell, with a seed-replication
-grid still executing at the time of writing. Nothing here should be read as a
-statement about what these objectives do at production scale or on clinical
-data.}}
+reported (1B) now has three training seeds per cell for \code{ar} and the
+hybrid; the 200M budget, and \code{recon\_only} and \code{jepa\_ema} at every
+budget they were run at, remain one training seed per cell. Nothing here
+should be read as a statement about what these objectives do at production
+scale or on clinical data.}}
 \end{center}
 
 \vspace{2mm}
@@ -99,15 +100,19 @@ $+0.0177$ to $+0.0296$; removing the latent term entirely and keeping only
 code reconstruction retains $+0.0254$. The dense causal hybrid scores 0.7287
 ($+0.0923$), the highest of the 20 cells. Scaling the hybrid and AR to 200M
 and 1B nominal token slots on a 6-layer, 256-wide encoder, the hybrid improves
-at every step (0.7287, 0.7328, 0.7356) while AR does not improve from 200M to
-1B (0.7304, 0.7237). Three pre-registered diagnostics measured on the
+at every step (0.7287, 0.7328, 0.7363, the last a 3-seed mean) while AR does
+not improve from 200M to 1B (0.7304, 0.7251, the last a 3-seed mean). At 1B,
+the hybrid leads AR on six of seven tasks by 0.81 to 2.16 AUROC points, and
+the per-task min-max range across the three seeds does not overlap between
+AR and the hybrid on four of those six. Three pre-registered diagnostics
+measured on the
 masked-span checkpoints are reported: a ridge map from mask-token time
 features alone recovers $R^2 = 0.58$ of the layer-normed targets against 0.79
 for the trained predictor with context; a linear code-identity probe reads
 top-1 0.50 off the trained JEPA encoders against 0.60 off an untrained
 encoder and 0.71 off the AR encoder; and without SIGReg a plain context-mean
 baseline reaches cosine 0.73 to the targets. We report what the evidence
-supports, what it does not, and the replication still outstanding.
+supports and what it does not.
 \end{abstract}
 
 \vspace{2mm}
@@ -160,7 +165,8 @@ importance:
       (Section~\ref{sec:eval}).
 \item Five ablation grids at a matched 48M-token budget --- 20 trained cells at
       seed 0, plus four seed-replication cells --- and two token-scaling grids
-      at 200M and 1B nominal token slots (Section~\ref{sec:experiments}).
+      at 200M and 1B nominal token slots, the 1B grid replicated at three
+      seeds each for \code{ar} and the hybrid (Section~\ref{sec:experiments}).
 \item The measured result that, at these budgets on this source, masked-span
       latent prediction alone does not move a frozen-encoder probe past its own
       untrained control, that an auxiliary discrete code term recovers most of
@@ -1119,7 +1125,9 @@ across all three budgets.
 \centering\footnotesize
 \caption{All trained cells across the three token budgets. The 48M rows are the
 pilot grids (4-layer, 192-wide, Apple M4/MPS); the 200M and 1B rows are the
-scale grids (6-layer, 256-wide, RTX 4060). Every row is seed 0. \code{gbm} and
+scale grids (6-layer, 256-wide, RTX 4060). Every row is seed 0 except the 1B
+\code{ar} and hybrid rows, which are the 3-seed mean (seeds 0, 1, 2; see
+Table~\ref{tab:seeds1b} for per-seed values, std and overlap). \code{gbm} and
 \code{lr} do not depend on the encoder and are reused at every budget.}
 \label{tab:scale}
 \resizebox{\textwidth}{!}{%
@@ -1142,8 +1150,8 @@ hybrid            & 200M & nextlatent  & 0.7511 & 0.5919 & 0.7761 & 0.7676 & 0.7
 \code{recon\_only}& 200M & recon-only  & 0.7326 & 0.6508 & 0.7336 & 0.7242 & 0.7568 & 0.7453 & 0.6894 & 0.7190 & $+$0.0448 \\
 \code{jepa\_ema}  & 200M & masked-span & 0.6948 & 0.6413 & 0.7108 & 0.7189 & 0.7499 & 0.7159 & 0.6580 & 0.6985 & $+$0.0243 \\
 \midrule
-hybrid            & 1B   & nextlatent  & 0.7553 & 0.5767 & 0.7741 & 0.7781 & 0.7779 & 0.7997 & 0.6874 & \best{0.7356} & $+$0.0809 \\
-\code{ar}         & 1B   & ar          & 0.7506 & 0.6028 & 0.7586 & 0.7629 & 0.7618 & 0.7804 & 0.6490 & 0.7237 & $+$0.0691 \\
+hybrid (3-seed)   & 1B   & nextlatent  & 0.7533 & 0.5866 & 0.7737 & 0.7780 & 0.7783 & 0.7987 & 0.6853 & \best{0.7363} & $+$0.0816 \\
+\code{ar} (3-seed)& 1B   & ar          & 0.7452 & 0.5997 & 0.7584 & 0.7674 & 0.7615 & 0.7796 & 0.6637 & 0.7251 & $+$0.0704 \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -1164,7 +1172,8 @@ fingerprint of the checkpoint file itself.
 \begin{table}[t]
 \centering\small
 \caption{\code{ar} against the hybrid across the three token budgets, mean
-AUROC and the \code{readmission\_30d} column. All rows seed 0.}
+AUROC and the \code{readmission\_30d} column. 48M and 200M rows are seed 0;
+the 1B row is the 3-seed mean (Table~\ref{tab:seeds1b}).}
 \label{tab:scaling}
 \begin{tabular}{lcccc}
 \toprule
@@ -1172,7 +1181,7 @@ tokens & \code{ar} mean & \code{ar} readmission & hybrid mean & hybrid readmissi
 \midrule
 48M  & 0.7205 & 0.6946 & 0.7287 & 0.6985 \\
 200M & 0.7304 & 0.6674 & 0.7328 & 0.6930 \\
-1B   & 0.7237 & 0.6490 & \best{0.7356} & \best{0.6874} \\
+1B (3-seed) & 0.7251 & 0.6637 & \best{0.7363} & \best{0.6853} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1182,42 +1191,45 @@ tokens & \code{ar} mean & \code{ar} readmission & hybrid mean & hybrid readmissi
 \includegraphics[width=\textwidth]{scale_desynpuf.png}
 \caption{Left: mean AUROC against token budget (log $x$) for \code{ar}, the
 hybrid, \code{recon\_only} and \code{jepa\_ema}, with \code{gbm} as a horizontal
-reference. Right: per-task AUROC at 1B tokens, \code{ar} against the hybrid,
-paired bars.}
+reference; the 1B \code{ar}/hybrid points are 3-seed means with a min-max
+error bar. Right: per-task AUROC at 1B tokens, \code{ar} against the hybrid,
+paired bars, each a 3-seed mean with a min-max whisker.}
 \label{fig:scale}
 \end{figure}
 
 \paragraph{Measured behaviour across budgets.}
-\code{ar} goes 0.7205 $\to$ 0.7304 $\to$ 0.7237. It does not improve from 200M
-to 1B ($-0.0067$) and drops on four of seven tasks over that step:
-\code{copd} $0.7747 \to 0.7629$, \code{diabetes} $0.7714 \to 0.7618$,
-\code{heart\_failure} $0.7908 \to 0.7804$, and \code{readmission\_30d}
-$0.6674 \to 0.6490$. The hybrid improves at every step: 0.7287 $\to$ 0.7328
-$\to$ 0.7356, that is $+0.0041$ then $+0.0028$. At 1B the hybrid leads
-\code{ar} on six of seven tasks --- every task but \code{mortality\_365d} --- by
-0.47 to 3.84 AUROC points (\code{inpatient} $+0.47$, \code{ckd} $+1.55$,
-\code{copd} $+1.52$, \code{diabetes} $+1.61$, \code{heart\_failure} $+1.93$,
-\code{readmission} $+3.84$); \code{ar} leads on \code{mortality\_365d} by 2.61
-points. The hybrid at 1B (0.7356) is the highest mean AUROC of any cell in the
-table, above \code{gbm} at 0.7261 and \code{lr} at 0.6949.
+\code{ar} goes 0.7205 $\to$ 0.7304 $\to$ 0.7251 (1B a 3-seed mean). It does
+not improve from 200M to 1B ($-0.0053$) and drops on six of seven tasks over
+that step --- every task but \code{mortality\_365d} ($0.5946 \to 0.5997$,
+$+0.0051$): \code{inpatient} $0.7515 \to 0.7452$, \code{ckd}
+$0.7624 \to 0.7584$, \code{copd} $0.7747 \to 0.7674$, \code{diabetes}
+$0.7714 \to 0.7615$, \code{heart\_failure} $0.7908 \to 0.7796$, and
+\code{readmission\_30d} $0.6674 \to 0.6637$. The hybrid improves at every
+step: 0.7287 $\to$ 0.7328 $\to$ 0.7363 (1B a 3-seed mean), that is $+0.0041$
+then $+0.0035$. At 1B (3-seed means) the hybrid leads \code{ar} on six of
+seven tasks --- every task but \code{mortality\_365d} --- by 0.81 to 2.16
+AUROC points (\code{inpatient} $+0.81$, \code{ckd} $+1.53$, \code{copd}
+$+1.05$, \code{diabetes} $+1.68$, \code{heart\_failure} $+1.92$,
+\code{readmission} $+2.16$); \code{ar} leads on \code{mortality\_365d} by 1.31
+points. The hybrid at 1B (0.7363, 3-seed mean) is the highest mean AUROC of
+any cell in the table, above \code{gbm} at 0.7261 and \code{lr} at 0.6949.
 \code{recon\_only} and \code{jepa\_ema} were run through 200M only.
 
-\subsection{Seed replication at 1B: in progress}
+\subsection{Seed replication at 1B}
 \label{sec:seeds1b}
 
 A seed-replication grid at the 1B budget (\code{scale1b-seeds-desynpuf}: seeds 1
-and 2 for both \code{ar} and the hybrid, four cells) is executing at the time of
-writing. \textbf{One of the four cells has completed.} Its numbers are in
-Table~\ref{tab:seeds1b}; the remaining three cells are pending and no number is
-reported for them.
+and 2 for both \code{ar} and the hybrid, four cells) has completed, giving
+three seeds (0, 1, 2) per cell. Table~\ref{tab:seeds1b} gives every per-seed
+value plus the per-task mean and sample standard deviation ($n{=}3$) for
+\code{ar} and the hybrid.
 
 \begin{table}[t]
 \centering\small
-\caption{1B seed replication, partial. Row 1 is the completed replicate; row 2
-is the seed-0 row from Table~\ref{tab:scale}, repeated for comparison. The
-replicate's per-task values were recorded to three decimal places, so its mean
-is a mean of three-decimal values. The remaining three cells of the grid
-(\code{ar} seed 2, hybrid seeds 1 and 2) had not completed.}
+\caption{1B seed replication, complete: three seeds per cell for \code{ar} and
+the hybrid. \code{std} is the sample standard deviation across the three
+seeds ($n{=}3$). Seed 0 rows repeat Table~\ref{tab:scale}'s single-seed 1B
+values; the mean rows repeat Table~\ref{tab:scale}'s 3-seed 1B values.}
 \label{tab:seeds1b}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{ll rrrrrrr r}
@@ -1228,23 +1240,41 @@ cell & seed
 & \rotatebox{60}{diabetes} & \rotatebox{60}{heart fail.}
 & \rotatebox{60}{readmiss.} & mean \\
 \midrule
-\code{ar} & 1 & 0.741 & 0.603 & 0.758 & 0.774 & 0.764 & 0.780 & 0.674 & 0.7277 \\
 \code{ar} & 0 & 0.7506 & 0.6028 & 0.7586 & 0.7629 & 0.7618 & 0.7804 & 0.6490 & 0.7237 \\
+\code{ar} & 1 & 0.7410 & 0.6031 & 0.7584 & 0.7738 & 0.7639 & 0.7796 & 0.6742 & 0.7277 \\
+\code{ar} & 2 & 0.7441 & 0.5933 & 0.7581 & 0.7656 & 0.7589 & 0.7787 & 0.6679 & 0.7238 \\
+\code{ar} & mean & 0.7452 & 0.5997 & 0.7584 & 0.7674 & 0.7615 & 0.7796 & 0.6637 & \best{0.7251} \\
+\code{ar} & std & 0.0049 & 0.0056 & 0.0003 & 0.0057 & 0.0025 & 0.0009 & 0.0131 & --- \\
 \midrule
-\multicolumn{2}{l}{difference (seed 1 $-$ seed 0)}
- & $-$0.010 & $+$0.000 & $-$0.001 & $+$0.011 & $+$0.002 & $-$0.000 & $+$0.025 & $+$0.0040 \\
-\code{ar} seed 2, hybrid seeds 1--2 & & \multicolumn{7}{c}{\emph{pending}} & \\
+hybrid & 0 & 0.7553 & 0.5767 & 0.7741 & 0.7781 & 0.7779 & 0.7997 & 0.6874 & 0.7356 \\
+hybrid & 1 & 0.7491 & 0.5862 & 0.7717 & 0.7798 & 0.7787 & 0.8015 & 0.6846 & 0.7359 \\
+hybrid & 2 & 0.7556 & 0.5969 & 0.7752 & 0.7760 & 0.7784 & 0.7950 & 0.6840 & 0.7373 \\
+hybrid & mean & 0.7533 & 0.5866 & 0.7737 & 0.7780 & 0.7783 & 0.7987 & 0.6853 & \best{0.7363} \\
+hybrid & std & 0.0037 & 0.0101 & 0.0018 & 0.0019 & 0.0004 & 0.0034 & 0.0018 & --- \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-One observation from this single replicate constrains the reading of
-Section~\ref{sec:scale} and is recorded here rather than in the discussion,
-because it is arithmetic rather than interpretation. The largest
-hybrid-over-\code{ar} margin at 1B is on \code{readmission\_30d}, 3.84 AUROC
-points. On that same task, \code{ar} moves 2.5 points between seed 0 and seed 1
-(0.6490 to 0.674). The seed spread on the task carrying the largest margin is
-therefore of the same order as the margin.
+\paragraph{Per-task overlap.} Comparing the min-max range across the three
+seeds, \code{ar} and the hybrid do not overlap on \code{ckd} (\code{ar}
+$0.7581$--$0.7586$ vs.\ hybrid $0.7717$--$0.7752$), \code{diabetes}
+($0.7589$--$0.7639$ vs.\ $0.7779$--$0.7787$), \code{heart\_failure}
+($0.7787$--$0.7804$ vs.\ $0.7950$--$0.8015$) and \code{readmission\_30d}
+($0.6490$--$0.6742$ vs.\ $0.6840$--$0.6874$). They overlap on
+\code{inpatient\_365d} ($0.7410$--$0.7506$ vs.\ $0.7491$--$0.7556$) and
+\code{mortality\_365d} ($0.5933$--$0.6031$ vs.\ $0.5767$--$0.5969$).
+\code{copd} does not overlap by the same min-max definition, but by the
+smallest margin of any non-overlapping task: \code{ar}'s maximum ($0.7738$)
+sits $0.0022$ below the hybrid's minimum ($0.7760$).
+
+The largest hybrid-over-\code{ar} margin at 1B, on \code{readmission\_30d}
+(Table~\ref{tab:scale}, $+2.16$ points on the 3-seed means), is also a task
+whose seed ranges do not overlap between the two objectives: every one of
+\code{ar}'s three seeds (0.6490, 0.6742, 0.6679) is below every one of the
+hybrid's three seeds (0.6874, 0.6846, 0.6840). \code{ar}'s within-family seed
+spread on this task (0.0131 std, the largest of any task for either
+objective) is therefore smaller than its gap to the hybrid, not comparable to
+it as the single-seed-1 replicate suggested.
 
 %==============================================================================
 \section{Discussion}
@@ -1273,42 +1303,51 @@ sitting below AR in absolute terms.
 \code{nextlatent\_h1416\_recon} scores 0.7287 at 48M against \code{ar}'s 0.7205
 and \code{nextlatent\_h1416}'s 0.6704, and it is the top row of all 20 pilot
 cells by both gain and absolute mean. At 200M it is 0.7328 against 0.7304; at
-1B, 0.7356 against 0.7237. Because setting $\lambda_{\mathrm{pred}} = 0$ reduces
-the hybrid to AR exactly, this is a controlled addition rather than a different
-model. The 48M seed replication puts the three-seed means at 0.7234 (\code{ar})
-and 0.7279 (hybrid), a gap of 0.0045, and Section~\ref{sec:seeds1b} shows the
-1B gap is not yet replicated.
+1B (3-seed means), 0.7363 against 0.7251. Because setting
+$\lambda_{\mathrm{pred}} = 0$ reduces the hybrid to AR exactly, this is a
+controlled addition rather than a different model. The 48M seed replication
+puts the three-seed means at 0.7234 (\code{ar}) and 0.7279 (hybrid), a gap of
+0.0045; the 1B seed replication (Section~\ref{sec:seeds1b}) puts the gap at
+0.0112, with the hybrid's per-task 3-seed range above \code{ar}'s on four
+tasks where the ranges do not overlap at all (\code{ckd}, \code{diabetes},
+\code{heart\_failure}, \code{readmission\_30d}).
 
 \paragraph{The AR plateau from 200M to 1B.}
-\code{ar} gains 0.0099 from 48M to 200M and loses 0.0067 from 200M to 1B, with
-four of seven tasks moving down over the second step. The hybrid gains at both
-steps, though by decreasing amounts ($+0.0041$, $+0.0028$). Two confounds must
-be named: the 48M points were trained on different hardware with a different
-and smaller architecture, so the 48M-to-200M step is not a clean token-budget
-step; and both 1B points are one seed each, with the replication in
-Section~\ref{sec:seeds1b} showing a $+0.0040$ mean shift for \code{ar} between
-seeds. A plateau claim at 1B on one seed per cell is a claim about two training
-runs.
+\code{ar} gains 0.0099 from 48M to 200M and loses 0.0053 from 200M to 1B
+(3-seed mean), with six of seven tasks moving down over the second step ---
+every task but \code{mortality\_365d}. The hybrid gains at both steps, though
+by decreasing amounts ($+0.0041$, $+0.0035$). One confound remains: the 48M
+points were trained on different hardware with a different and smaller
+architecture, so the 48M-to-200M step is not a clean token-budget step; the
+200M point is also still a single seed, so the 200M-to-1B step compares one
+run to a three-seed mean. The 1B point itself no longer carries a
+single-seed caveat: three seeds put \code{ar}'s 1B mean at 0.7251 with a
+per-task std of 0.0003 to 0.0131 (Table~\ref{tab:seeds1b}), and the drop from
+200M persists at every one of the three seeds (0.7237, 0.7277, 0.7238, all
+below 200M's 0.7304).
 
 \paragraph{The readmission signature.}
 \code{readmission\_30d} behaves differently from the other six tasks in three
 places. It is the task where the count-feature \code{gbm} baseline is weakest
 relative to the encoders (0.6724, below both 48M encoder cells). It is the task
 where \code{ar} degrades monotonically with token budget --- 0.6946, 0.6674,
-0.6490 --- while the hybrid declines far less --- 0.6985, 0.6930, 0.6874 ---
-producing the 3.84-point gap at 1B, the largest of any task. And it is the task
-with the largest few-shot separation: at $k{=}128$ the hybrid reads 0.6487
-against \code{ar}'s 0.5994, and at 48M with three seeds the hybrid-over-\code{ar}
-gap (0.6969 vs 0.6824) exceeds both families' seed ranges. Readmission is also
-the only task anchored on a \emph{specific event type} (an inpatient discharge)
-rather than on a hash-drawn time, and the only one with a 30-day rather than a
-365-day horizon. A short horizon anchored on a discharge is the task most
-plausibly served by a representation that predicts what happens next in
-\emph{time} rather than what codes are prevalent, which is what the dense
-next-latent term at horizons $\{1, 4, 16\}$ supplies. That is a hypothesis
-consistent with the numbers, not something these experiments establish. Note
-also that both families decline on this task as the budget grows, which nothing
-here explains.
+0.6637 (3-seed mean) --- while the hybrid declines far less --- 0.6985, 0.6930,
+0.6853 (3-seed mean) --- producing a 2.16-point gap at 1B, the largest of any
+task, and the only task at 1B whose three-seed \code{ar} and hybrid ranges do
+not overlap by any margin: \code{ar}'s worst seed (0.6742) is still below the
+hybrid's worst seed (0.6840). And it is the task with the largest few-shot
+separation: at $k{=}128$ the hybrid reads 0.6487 against \code{ar}'s 0.5994,
+and at 48M with three seeds the hybrid-over-\code{ar} gap (0.6969 vs 0.6824)
+exceeds both families' seed ranges. Readmission is also the only task
+anchored on a \emph{specific event type} (an inpatient discharge) rather than
+on a hash-drawn time, and the only one with a 30-day rather than a 365-day
+horizon. A short horizon anchored on a discharge is the task most plausibly
+served by a representation that predicts what happens next in \emph{time}
+rather than what codes are prevalent, which is what the dense next-latent
+term at horizons $\{1, 4, 16\}$ supplies. That is a hypothesis consistent
+with the numbers, not something these experiments establish. Note also that
+both families decline on this task as the budget grows, which nothing here
+explains.
 
 \subsection{What the evidence does not support}
 
@@ -1323,10 +1362,15 @@ here explains.
 \item \textbf{No claim of comparability to published EHR results.} No
       experiment in this paper touches MIMIC-IV or EHRSHOT. DE-SynPUF's
       construction weakens history-to-future association by design.
-\item \textbf{No claim that the hybrid's 1B lead is replicated.} It is one
-      training run per cell. The completed \code{ar} replicate moves the mean by
-      $+0.0040$ and moves \code{readmission\_30d} --- the task carrying the
-      largest margin --- by 2.5 points.
+\item \textbf{No significance test on the 1B lead, and only three seeds.}
+      Table~\ref{tab:seeds1b} gives three training runs per cell for
+      \code{ar} and the hybrid at 1B, not a hypothesis test; no $p$-value or
+      confidence interval over seeds is computed anywhere in this paper. The
+      per-task min-max ranges do not overlap on four of seven tasks and do
+      overlap on two (\code{inpatient\_365d}, \code{mortality\_365d}), which
+      is evidence for a real per-task difference on those four, not proof of
+      one, and three seeds is too few to characterize the tails of the
+      across-seed distribution.
 \item \textbf{No claim about calibration or clinical utility.} AUROC is the
       metric reported throughout. AUPRC, Brier and calibration slope are
       computed and stored for every cell but are not analysed here.
@@ -1340,11 +1384,16 @@ here explains.
 \label{sec:limitations}
 
 \begin{enumerate}[leftmargin=*,itemsep=3pt,topsep=3pt]
-\item \textbf{Single seed at 1B; replication in progress.} Both 1B rows in
-      Table~\ref{tab:scale} are seed 0. One of the four seed-replication cells
-      has completed (Section~\ref{sec:seeds1b}). At 48M, only \code{ar} and the
-      hybrid have three seeds; every masked-span, JEPA$+$recon, recon-only and
-      window cell in Table~\ref{tab:master} is seed 0 alone.
+\item \textbf{Single seed at 200M; three seeds at 1B for two of four
+      objectives.} The 1B \code{ar} and hybrid cells have three seeds each
+      (Section~\ref{sec:seeds1b}); every 200M cell (\code{ar}, hybrid,
+      \code{recon\_only}, \code{jepa\_ema}) is seed 0 only, so the 200M-to-1B
+      comparison in Table~\ref{tab:scale} rests on a single 200M run against a
+      three-seed 1B mean. \code{recon\_only} and \code{jepa\_ema} have no
+      seed-replication grid at any budget and have not been run at 1B. At
+      48M, only \code{ar} and the hybrid have three seeds; every masked-span,
+      JEPA$+$recon, recon-only and window cell in Table~\ref{tab:master} is
+      seed 0 alone.
 \item \textbf{Claims data without laboratory values.} DE-SynPUF has no lab
       results, no vitals and no notes. The value channel carries little
       (length of stay, days supplied), so the value quantizer and the value
@@ -1390,8 +1439,9 @@ here explains.
 In the order they are queued:
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
-\item Complete the 1B seed-replication grid (\code{ar} seed 2, hybrid seeds 1
-      and 2) and re-report Section~\ref{sec:scale} with three seeds per cell.
+\item Reseed the 200M grid (\code{ar}, hybrid, \code{recon\_only},
+      \code{jepa\_ema}) so the 200M-to-1B step is a matched-seed-count
+      comparison, now that 1B has three seeds for \code{ar} and the hybrid.
 \item Take \code{recon\_only} and a masked-span cell to 1B, so that the
       objective-family ordering at 48M and 200M can be checked at the largest
       budget rather than inferred.

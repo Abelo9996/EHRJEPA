@@ -1,7 +1,7 @@
 """``python scripts/plot_scale.py`` -- render the token-scaling figure for
 ``ar``, ``hybrid``, ``recon_only`` and ``jepa_ema`` on DE-SynPUF sample 1.
 
-Reads five committed ``summary.md`` files -- nothing plotted is a number not
+Reads six committed ``summary.md`` files -- nothing plotted is a number not
 already committed in one of those tables:
 
 * ``docs/experiments/2026-09-03-pilot-desynpuf/summary.md`` (grid 1, 48M
@@ -12,17 +12,24 @@ already committed in one of those tables:
   tokens, 4L/192d) for ``nextlatent_h1416_recon``, read here as ``hybrid``;
 * ``docs/experiments/scale-desynpuf/summary.md`` (200M tokens, 6L/256d) for
   all four cells;
-* ``docs/experiments/scale1b-desynpuf/summary.md`` (1B tokens, 6L/256d) for
-  ``ar`` and ``hybrid`` only -- ``recon_only`` and ``jepa_ema`` were not run
-  at 1B.
+* ``docs/experiments/scale1b-desynpuf/summary.md`` (1B tokens, 6L/256d,
+  seed 0) for ``ar`` and ``hybrid`` -- ``recon_only`` and ``jepa_ema`` were
+  not run at 1B;
+* ``docs/experiments/scale1b-seeds-desynpuf/summary.md`` (1B tokens, 6L/256d,
+  seeds 1 and 2) for ``ar`` and ``hybrid``.
+
+The 1B point for ``ar`` and ``hybrid`` is therefore a 3-seed mean (seeds 0,
+1, 2) in both panels; nothing else on the plot is averaged across seeds.
 
 Two panels:
 
 * **left** -- mean held-out AUROC across the seven tasks vs. nominal token
   budget (log x), one line per objective, with a dashed horizontal reference
-  at the ``gbm`` count-feature baseline;
+  at the ``gbm`` count-feature baseline; the 1B ``ar``/``hybrid`` markers
+  carry a vertical min-max error bar across the three seeds;
 * **right** -- per-task AUROC at 1B tokens, ``ar`` vs. ``hybrid``, as paired
-  bars (the only two cells trained at that budget).
+  bars (the only two cells trained at that budget), each bar plotting the
+  3-seed mean with a min-max whisker.
 
 Same palette as ``scripts/plot_grids.py``: ``ar`` aqua, ``masked-span jepa``
 (``jepa_ema``) yellow, ``recon-only`` green, ``nextlatent`` (``hybrid``)
@@ -64,8 +71,12 @@ GRID3 = REPO / "docs/experiments/2026-09-04-pilot3-desynpuf/summary.md"
 GRID4 = REPO / "docs/experiments/2026-09-04-pilot4-desynpuf/summary.md"
 SCALE_200M = REPO / "docs/experiments/scale-desynpuf/summary.md"
 SCALE_1B = REPO / "docs/experiments/scale1b-desynpuf/summary.md"
+SCALE_1B_SEEDS = REPO / "docs/experiments/scale1b-seeds-desynpuf/summary.md"
 
 # (series label, nominal tokens, source file, row name in that file)
+# The 1B entries for ar/hybrid below are placeholders for the file/row used
+# to key the 1B token count; their scores are replaced with a 3-seed mean
+# (see _load_1b_seed_scores) rather than read as a single row.
 SERIES_POINTS: dict[str, list[tuple[float, Path, str]]] = {
     "ar": [
         (48_005_120, GRID1, "ar"),
@@ -85,6 +96,13 @@ SERIES_POINTS: dict[str, list[tuple[float, Path, str]]] = {
         (48_005_120, GRID1, "jepa_ema"),
         (200_015_872, SCALE_200M, "jepa_ema"),
     ],
+}
+
+# Cells with a 1B, 3-seed replication grid; row names in SCALE_1B_SEEDS for
+# seeds 1 and 2 (seed 0 is the row of the same name in SCALE_1B).
+SEED1B_ROWS: dict[str, tuple[str, str]] = {
+    "ar": ("ar_s1", "ar_s2"),
+    "hybrid": ("hybrid_s1", "hybrid_s2"),
 }
 
 # Same categorical slots as scripts/plot_grids.py.
@@ -132,8 +150,20 @@ def _mean(scores: dict[str, float]) -> float:
     return float(np.mean([scores[t] for t in TASKS]))
 
 
-def load_series() -> tuple[dict[str, list[tuple[float, float]]], float]:
-    """Return {series: [(tokens, mean_auroc), ...]} and the gbm reference."""
+def _load_1b_seed_scores(name: str) -> list[dict[str, float]]:
+    """Per-task scores for each of the 3 seeds (0, 1, 2) for ``name`` (ar|hybrid) at 1B tokens."""
+    seed0 = _load(SCALE_1B, "| run |", "run")[name]
+    seeds = _load(SCALE_1B_SEEDS, "| run |", "run")
+    row_s1, row_s2 = SEED1B_ROWS[name]
+    return [seed0, seeds[row_s1], seeds[row_s2]]
+
+
+def load_series() -> tuple[
+    dict[str, list[tuple[float, float]]], float, dict[str, tuple[float, float]]
+]:
+    """Return {series: [(tokens, mean_auroc), ...]}, the gbm reference, and
+    {name: (min_mean_auroc, max_mean_auroc)} across the 3 seeds at 1B for
+    ar/hybrid (empty for series without a seed grid)."""
     cache: dict[Path, dict[str, dict[str, float]]] = {}
 
     def runs(path: Path) -> dict[str, dict[str, float]]:
@@ -142,16 +172,39 @@ def load_series() -> tuple[dict[str, list[tuple[float, float]]], float]:
         return cache[path]
 
     series: dict[str, list[tuple[float, float]]] = {}
+    seed1b_range: dict[str, tuple[float, float]] = {}
     for name, points in SERIES_POINTS.items():
-        series[name] = [(tokens, _mean(runs(path)[row])) for tokens, path, row in points]
+        pts: list[tuple[float, float]] = []
+        for tokens, path, row in points:
+            if path is SCALE_1B and name in SEED1B_ROWS:
+                per_seed_means = [_mean(scores) for scores in _load_1b_seed_scores(name)]
+                pts.append((tokens, float(np.mean(per_seed_means))))
+                seed1b_range[name] = (min(per_seed_means), max(per_seed_means))
+            else:
+                pts.append((tokens, _mean(runs(path)[row])))
+        series[name] = pts
 
     gbm = _mean(_load(SCALE_200M, "| model |", "model")["gbm"])
-    return series, gbm
+    return series, gbm, seed1b_range
 
 
-def load_1b_per_task() -> dict[str, dict[str, float]]:
-    runs = _load(SCALE_1B, "| run |", "run")
-    return {"ar": runs["ar"], "hybrid": runs["hybrid"]}
+def load_1b_per_task() -> tuple[
+    dict[str, dict[str, float]], dict[str, dict[str, tuple[float, float]]]
+]:
+    """Return {name: {task: 3-seed mean}} and {name: {task: (mean-min, max-mean)}}
+    for ar/hybrid at 1B tokens."""
+    means: dict[str, dict[str, float]] = {}
+    errs: dict[str, dict[str, tuple[float, float]]] = {}
+    for name in ("ar", "hybrid"):
+        seed_scores = _load_1b_seed_scores(name)
+        task_means = {t: float(np.mean([s[t] for s in seed_scores])) for t in TASKS}
+        task_mins = {t: float(np.min([s[t] for s in seed_scores])) for t in TASKS}
+        task_maxs = {t: float(np.max([s[t] for s in seed_scores])) for t in TASKS}
+        means[name] = task_means
+        errs[name] = {
+            t: (task_means[t] - task_mins[t], task_maxs[t] - task_means[t]) for t in TASKS
+        }
+    return means, errs
 
 
 def main() -> None:
@@ -160,8 +213,8 @@ def main() -> None:
     parser.add_argument("--dpi", type=int, default=150)
     args = parser.parse_args()
 
-    series, gbm = load_series()
-    per_task = load_1b_per_task()
+    series, gbm, seed1b_range = load_series()
+    per_task, per_task_err = load_1b_per_task()
 
     fig, (ax_scale, ax_task) = plt.subplots(1, 2, figsize=(13, 5))
 
@@ -177,6 +230,19 @@ def main() -> None:
             markersize=6,
             label=name,
         )
+        if name in seed1b_range:
+            lo, hi = seed1b_range[name]
+            tokens_1b, mean_1b = points[-1]
+            ax_scale.errorbar(
+                [tokens_1b],
+                [mean_1b],
+                yerr=[[mean_1b - lo], [hi - mean_1b]],
+                fmt="none",
+                ecolor=SERIES_COLOR[name],
+                elinewidth=1.3,
+                capsize=4,
+                zorder=3,
+            )
     ax_scale.axhline(gbm, color=COLOR_GBM, linewidth=1.3, linestyle="--", zorder=0)
     ax_scale.text(48_005_120, gbm, " gbm", color=COLOR_GBM, fontsize=8, va="bottom", ha="left")
     ax_scale.set_xscale("log")
@@ -191,6 +257,8 @@ def main() -> None:
     width = 0.38
     ar_vals = [per_task["ar"][t] for t in TASKS]
     hybrid_vals = [per_task["hybrid"][t] for t in TASKS]
+    ar_err = np.array([per_task_err["ar"][t] for t in TASKS]).T
+    hybrid_err = np.array([per_task_err["hybrid"][t] for t in TASKS]).T
     ax_task.bar(
         x - width / 2,
         ar_vals,
@@ -199,6 +267,8 @@ def main() -> None:
         edgecolor=INK,
         linewidth=0.5,
         label="ar",
+        yerr=ar_err,
+        error_kw={"ecolor": INK, "elinewidth": 1.0, "capsize": 3},
     )
     ax_task.bar(
         x + width / 2,
@@ -208,12 +278,16 @@ def main() -> None:
         edgecolor=INK,
         linewidth=0.5,
         label="hybrid",
+        yerr=hybrid_err,
+        error_kw={"ecolor": INK, "elinewidth": 1.0, "capsize": 3},
     )
     ax_task.set_xticks(x)
     ax_task.set_xticklabels([TASK_LABELS[t] for t in TASKS], rotation=30, ha="right", fontsize=8.5)
     ax_task.set_ylabel("held-out AUROC")
     ax_task.set_ylim(0.5, 0.85)
-    ax_task.set_title("Per-task AUROC at 1B tokens: ar vs. hybrid", fontsize=10, color=INK)
+    ax_task.set_title(
+        "Per-task AUROC at 1B tokens: ar vs. hybrid, 3-seed mean", fontsize=10, color=INK
+    )
     ax_task.grid(axis="y", color=GRID_COLOR, linewidth=0.8, zorder=0)
     ax_task.set_axisbelow(True)
     ax_task.legend(frameon=False, fontsize=8.5, loc="lower right")
