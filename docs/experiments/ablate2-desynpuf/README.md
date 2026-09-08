@@ -1,11 +1,14 @@
 # 2026-09-07 -- ablate2-desynpuf: size, hybrid design, and the full held-out split
 
-`configs/grids/ablate2_desynpuf.yaml`, not yet run. Eighteen rows: sixteen
-trained cells at 200M nominal token slots each (the same per-cell budget as
-`scale-desynpuf`), two `reuse_checkpoint` rows that re-score
-`scale-desynpuf`'s existing `ar` and `hybrid` checkpoints. Nothing in this
-README is a result; the numbers land in `summary.md` and `summary.json`,
-appended by `scripts/ablate.py` as each cell finishes.
+`configs/grids/ablate2_desynpuf.yaml`, complete as of 2026-09-08. Eighteen
+rows: sixteen trained cells at 200M nominal token slots each (the same
+per-cell budget as `scale-desynpuf`), two `reuse_checkpoint` rows that
+re-score `scale-desynpuf`'s existing `ar` and `hybrid` checkpoints. Nothing
+in this README is a result; the numbers are in `summary.md` and
+`summary.json`, appended by `scripts/ablate.py` as each cell finished. The
+analysis answering the three questions below, the figure, and the resulting
+default-config decision are in
+[`docs/experiments/ABLATION_RESULTS.md`](../ABLATION_RESULTS.md).
 
 ## Three questions, stated before the runs started
 

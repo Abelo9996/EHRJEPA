@@ -31,6 +31,14 @@
 # scale/jepa/bf16 ...` (or a 50-step manual run with this config) on the
 # actual card, and fall back to `optim.accum_steps: 2` with `run.batch_size:
 # 32` (same effective batch, half the activation memory) if it does not fit.
+#
+# This file stays as the size/shape reference used across the pilot, scale
+# and ablation grids (its `objective` section below is grid-overridden per
+# cell, not the recommended training objective). For a standalone pretrain
+# run, use configs/pretrain_default.yaml instead: hybrid objective (causal,
+# EMA target, horizons [1, 4, 16], lambda_recon 0.1, lambda_sigreg 0), chosen
+# in docs/experiments/ABLATION_RESULTS.md over plain `ar` at every model size
+# tested and over four other hybrid-knob variants.
 
 data:
   cache_dir: data/cache/desynpuf-s1

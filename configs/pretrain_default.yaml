@@ -1,0 +1,85 @@
+# Default pretraining config: the causal next-latent-plus-recon hybrid,
+# 6-layer / 256-wide encoder, chosen in docs/experiments/ABLATION_RESULTS.md.
+#
+# That grid (`ablate2-desynpuf`, full 11.7k-subject held-out split, 200M
+# nominal token slots per cell, 2 seeds) found the hybrid ahead of plain `ar`
+# at every model size tested (small 4L/192d, base 6L/256d, large 8L/384d;
+# mean-of-6-non-mortality-task AUROC deltas +0.0079 / +0.0047 / +0.0055), and,
+# among five base-size hybrid-knob variants, `lambda_sigreg: 0` (no SIGReg)
+# the best at both seeds -- ahead of a shared instead of EMA target and of a
+# single horizon instead of [1, 4, 16], the two worst variants, and
+# indistinguishable from `lambda_recon: 0.3` within seed noise for the
+# recon-weight knob, so `lambda_recon` stays at its existing 0.1. This file is
+# otherwise identical to configs/pretrain_scale.yaml (same size, same data,
+# masking, optimizer and run settings) -- see that file for the hardware and
+# memory notes.
+
+data:
+  cache_dir: data/cache/desynpuf-s1
+  split: train
+  max_len: 512
+  min_len: 16
+  sampling: random_window
+  num_workers: 0
+
+model:
+  dim: 256
+  depth: 6
+  heads: 4                # head_dim 64
+  mlp: swiglu
+  mlp_ratio: 4.0
+  dropout: 0.1
+  attn_dropout: 0.0
+  n_freq: 16
+  pred_dim: 128
+  pred_depth: 4
+  pred_heads: 4
+  target_mode: ema         # ABLATION_RESULTS.md: shared target is a worst knob
+  ema_start: 0.996
+  ema_end: 1.0
+  causal: true              # required by the nextlatent objective
+  tie_embeddings: true
+
+objective:
+  kind: nextlatent          # "jepa", "ar", "nextlatent" or "window"
+  horizons: [1, 4, 16]      # ABLATION_RESULTS.md: horizon-[1]-only is a worst knob
+  lambda_recon: 0.1         # ABLATION_RESULTS.md: 0.3 is within noise of 0.1
+  lambda_sigreg: 0.0        # ABLATION_RESULTS.md: no-SIGReg is the best knob
+  smooth_l1_beta: 1.0
+  sigreg_directions: 256
+  sigreg_max_rows: 8192
+  sigreg_grid: 17           # the paper's grid: 17 trapezoid points on [-5, 5]
+  sigreg_t_max: 5.0
+  sigreg_sigma: 1.0
+
+masking:
+  p_future: 0.6
+  future_min_span: 8
+  future_max_span: 64
+  future_cut_low: 0.3
+  future_cut_high: 0.9
+  block_min_blocks: 2
+  block_max_blocks: 4
+  block_block_low: 0.05
+  block_block_high: 0.15
+  block_context_drop: 0.3
+
+optim:
+  lr: 3.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  warmup_steps: 100
+  min_lr_ratio: 0.01
+  grad_clip: 1.0
+  accum_steps: 1
+
+run:
+  steps: 2000               # placeholder for standalone use; a grid sets this
+  batch_size: 64
+  seed: 0
+  device: auto               # resolves to cuda first (utils.runtime.resolve_device)
+  precision: bf16
+  out_dir: runs/pretrain_default
+  log_every: 25
+  ckpt_every: 2000
+  tensorboard: true

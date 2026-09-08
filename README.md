@@ -125,6 +125,22 @@ seed 0):
   `inpatient_365d` and `mortality_365d`, and are within 0.0022 of overlapping
   on `new_dx_365d/copd`.
 
+**Ablations** (from
+[`docs/experiments/ABLATION_RESULTS.md`](docs/experiments/ABLATION_RESULTS.md),
+`ablate2-desynpuf`: `ar` vs. hybrid at small/base/large (4L/192d, 6L/256d,
+8L/384d) plus 4 base-size hybrid-knob variants, 200M tokens/cell, full
+11,708-subject held-out split, 2 seeds where noted):
+
+- `hybrid` leads `ar` on the 6-non-mortality-task mean AUROC at every size:
+  +0.0079 (small), +0.0047 (base, seed 0 only), +0.0055 (large) — the gap
+  does not close as size increases.
+- Of 4 base-size hybrid-knob variants, no-SIGReg (`lambda_sigreg: 0`) is the
+  best at both seeds; horizon-[1]-only and shared-target are the worst;
+  `lambda_recon: 0.3` is within 0.0039 of the `0.1` default, inside the
+  0.0020-0.0046 seed spread among these knobs.
+- New default (`configs/pretrain_default.yaml`): hybrid, causal, EMA target,
+  horizons `[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`.
+
 **Pilot findings** (from
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the
 consolidated table for grids 1-4: 20 trained cells, 2,930 steps /
