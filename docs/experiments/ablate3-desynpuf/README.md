@@ -1,11 +1,13 @@
 # 2026-09-07 -- ablate3-desynpuf: a frozen teacher, and code embeddings that start as words
 
-`configs/grids/ablate3_desynpuf.yaml`, not yet run. Ten trained cells at 200M
-nominal token slots each -- five configurations at two seeds -- on the same base
-config, budget and full-held-out eval protocol as `ablate2-desynpuf`, so a row
-here reads directly against a row there. Nothing in this README is a result; the
-numbers land in `summary.md` and `summary.json`, appended by `scripts/ablate.py`
-as each cell finishes.
+**Complete.** Ten trained cells at 200M nominal token slots each -- five
+configurations at two seeds -- on the same base config, budget and
+full-held-out eval protocol as `ablate2-desynpuf`, so a row here reads
+directly against a row there. Results, the per-task table and findings are in
+[`docs/experiments/ABLATION_RESULTS.md`](../ABLATION_RESULTS.md#grid-3-teachers-and-code-embedding-initialization-ablate3-desynpuf);
+the raw numbers are in `summary.md` and `summary.json`, appended by
+`scripts/ablate.py` as each cell finished. The rest of this document is the
+protocol as planned before the runs started.
 
 ## Four questions, stated before the runs started
 

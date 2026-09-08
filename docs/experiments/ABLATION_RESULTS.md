@@ -1,4 +1,4 @@
-# Ablation results -- model size and hybrid-knob effects (`ablate2-desynpuf`)
+# Ablation results -- model size, hybrid-knob, teacher and init effects
 
 Source: [`docs/experiments/ablate2-desynpuf/summary.md`](ablate2-desynpuf/summary.md)
 and [`summary.json`](ablate2-desynpuf/summary.json); protocol in
@@ -74,12 +74,12 @@ control covers both.
 
 ## (e) Decision: new default
 
-New default (`configs/pretrain_default.yaml`): hybrid objective
-(`objective.kind: nextlatent`), causal encoder (`model.causal: true`), EMA
-target (`model.target_mode: ema`), horizons `[1, 4, 16]`
-(`objective.horizons`), `objective.lambda_recon: 0.1`,
+Default (`configs/pretrain_default.yaml`) remains: hybrid objective
+(`objective.kind: nextlatent`), causal encoder (`model.causal: true`),
+horizons `[1, 4, 16]` (`objective.horizons`), `objective.lambda_recon: 0.1`,
 `objective.lambda_sigreg: 0.0` (SIGReg dropped, per the no-SIGReg result
-above).
+above). Target encoder: EMA or frozen AR teacher, pending `ablate4-desynpuf`
+(below).
 
 ## (f) Caveats
 
@@ -94,3 +94,60 @@ above).
   vs. the default) against a seed spread of about 0.3-0.5 points among those
   same knobs -- the no-SIGReg and shared-target/horizon-[1] results are
   outside that spread; recon 0.3 vs. 0.1 is inside it.
+
+## Grid 3: teachers and code-embedding initialization (`ablate3-desynpuf`)
+
+Source: [`docs/experiments/ablate3-desynpuf/summary.md`](ablate3-desynpuf/summary.md)
+and [`summary.json`](ablate3-desynpuf/summary.json); protocol in
+[`ablate3-desynpuf/README.md`](ablate3-desynpuf/README.md), complete. Same base
+config, budget (200,000,000 nominal token slots per cell) and full held-out
+eval protocol as `ablate2-desynpuf`, so these rows read directly against the
+`(b)` table above. Ten trained cells, five configurations at `run.seed` 1 and
+2: `hybrid_frozen_ar` (frozen 1B AR checkpoint as target encoder,
+`lambda_sigreg: 0.05`), `hybrid_frozen_ar_init` (student also initialized from
+that checkpoint), `hybrid_textinit` (text-initialized code table, trainable,
+EMA target), `hybrid_textinit_frozen` (same table, frozen), `ar_textinit` (ar
+objective, text-initialized table). `seed spread` is the per-task `|s1 - s2|`,
+averaged over the six non-mortality tasks.
+
+| config | inpatient | mortality | ckd | copd | diabetes | heart_failure | readmission | mean-of-6 | mean-of-7 | seed spread (mean-of-6) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `hybrid_frozen_ar` | 0.7571 | 0.6139 | 0.7827 | 0.7700 | 0.7761 | 0.7938 | 0.6889 | 0.7615 | 0.7404 | 0.0036 |
+| `hybrid_frozen_ar_init` | 0.7528 | 0.6160 | 0.7798 | 0.7677 | 0.7730 | 0.7868 | 0.6753 | 0.7559 | 0.7359 | 0.0013 |
+| `hybrid_textinit` | 0.7530 | 0.6206 | 0.7800 | 0.7641 | 0.7717 | 0.7721 | 0.6955 | 0.7561 | 0.7367 | 0.0022 |
+| `hybrid_textinit_frozen` | 0.7537 | 0.6129 | 0.7769 | 0.7614 | 0.7752 | 0.7701 | 0.6904 | 0.7546 | 0.7344 | 0.0053 |
+| `ar_textinit` | 0.7502 | 0.6045 | 0.7711 | 0.7612 | 0.7710 | 0.7739 | 0.6666 | 0.7490 | 0.7283 | 0.0052 |
+
+### References
+
+| model | inpatient | mortality | ckd | copd | diabetes | heart_failure | readmission | mean-of-6 | mean-of-7 |
+|---|---|---|---|---|---|---|---|---|---|
+| `hybrid_base_s0` (EMA default, seed 0) | 0.7523 | 0.6088 | 0.7798 | 0.7643 | 0.7720 | 0.7745 | 0.6896 | 0.7554 | 0.7345 |
+| `hybrid_nosig` (no SIGReg, 2-seed, `ablate2-desynpuf`) | 0.7572 | 0.5984 | 0.7819 | 0.7700 | 0.7785 | 0.7838 | 0.6977 | 0.7615 | -- |
+| `ar_base_s0` (seed 0) | 0.7500 | 0.6158 | 0.7725 | 0.7666 | 0.7725 | 0.7813 | 0.6614 | 0.7507 | 0.7315 |
+| `gbm` | 0.7455 | 0.5564 | 0.7713 | 0.7677 | 0.7709 | 0.7840 | 0.6670 | 0.7511 | 0.7233 |
+| `lr` | 0.7124 | 0.5659 | 0.7390 | 0.7326 | 0.7368 | 0.7407 | 0.6529 | 0.7191 | 0.6972 |
+| `random_init@hybrid_frozen_ar_s1` | 0.6742 | 0.5406 | 0.6857 | 0.6906 | 0.7185 | 0.6897 | 0.6166 | 0.6792 | 0.6594 |
+
+### Findings
+
+- The frozen AR teacher gains +0.6 (mean-of-6) over the EMA default: 0.7615
+  vs. 0.7554. This is the same value, and the same gain, as the no-SIGReg
+  result in Grid 2 (0.7615 vs. 0.7554).
+- Initializing the student from the same checkpoint removes the gain:
+  `hybrid_frozen_ar_init` is 0.7559 against the 0.7554 default, +0.0005. The
+  frozen-teacher gain is a property of the target, not of starting the
+  student from pretrained AR weights.
+- Text-initialized code embeddings are neutral for both objectives:
+  `hybrid_textinit` is 0.7561 against the 0.7554 EMA default (+0.0007);
+  `ar_textinit` is 0.7490 against the 0.7507 `ar_base_s0` reference
+  (-0.0017). Both differences are inside the seed spread measured on these
+  cells (0.0022-0.0052).
+- Freezing the text table costs 0.1 (0.7561 vs. 0.7546, `hybrid_textinit` vs.
+  `hybrid_textinit_frozen`) while removing 58% of the trainable parameters:
+  the code table is 7,680,000 of the base-size hybrid's 13,208,336 trainable
+  parameters; freezing it leaves 5,528,336 trainable.
+- `ablate4-desynpuf` (running) puts the frozen AR teacher and
+  `lambda_sigreg: 0` in the same cell, two seeds, to test whether the two
+  gains stack.
+

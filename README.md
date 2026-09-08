@@ -138,8 +138,15 @@ seed 0):
   best at both seeds; horizon-[1]-only and shared-target are the worst;
   `lambda_recon: 0.3` is within 0.0039 of the `0.1` default, inside the
   0.0020-0.0046 seed spread among these knobs.
-- New default (`configs/pretrain_default.yaml`): hybrid, causal, EMA target,
-  horizons `[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`.
+- New default (`configs/pretrain_default.yaml`): hybrid, causal,
+  horizons `[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`; target
+  encoder EMA or frozen AR teacher, pending `ablate4-desynpuf`.
+- `ablate3-desynpuf` (same protocol, 2 seeds): a frozen 1B AR checkpoint as
+  target encoder gains +0.6 (mean-of-6) over the EMA default, equal to the
+  no-SIGReg gain; initializing the student from that checkpoint removes the
+  gain. Text-initialized code embeddings are neutral for both the hybrid and
+  `ar` objectives; freezing the text table costs 0.1 while removing 58% of
+  the trainable parameters (7,680,000 of 13,208,336).
 
 **Pilot findings** (from
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the

@@ -225,8 +225,9 @@ target encoder; V-JEPA~2 \citep{vjepa2} extends it to video at scale. LeJEPA
 explicit isotropic-Gaussian penalty estimated through random one-dimensional
 projections, and is the formulation this implementation follows;
 \citet{salt} report that the teacher branch can be frozen without loss, which
-is the same question our \code{shared}-versus-\code{ema} ablation asks in a
-different form. LeNEPA \citep{lenepa} pursues next-latent prediction for time
+our \code{shared}-versus-\code{ema} ablation asks in a different form and
+Section~\ref{sec:ablate3}'s frozen-AR-teacher cell tests directly. LeNEPA
+\citep{lenepa} pursues next-latent prediction for time
 series without augmentation, which is structurally the objective family
 (b) below arrives at from a different direction.
 
@@ -1373,15 +1374,78 @@ measured among these four knobs.
 
 \paragraph{Decision.} Section~\ref{sec:roadmap} adopts a new default
 configuration (\code{configs/pretrain\_default.yaml}) from this result: the
-hybrid objective, causal encoder, EMA target, horizons $[1, 4, 16]$,
+hybrid objective, causal encoder, horizons $[1, 4, 16]$,
 $\lambda_{\mathrm{recon}} = 0.1$, and $\lambda_{\mathrm{sig}} = 0$ --- SIGReg
-dropped, per the no-SIGReg result above.
+dropped, per the no-SIGReg result above. The target encoder is EMA or a
+frozen AR teacher (Section~\ref{sec:ablate3}), pending \code{ablate4-desynpuf}.
 
 \paragraph{Caveats.} The base-size default row is one seed, so every
 size/knob comparison against it is a 2-seed-vs-1-seed comparison, not
 2-seed-vs-2-seed. 200M nominal token slots, DE-SynPUF only. Differences among
 the base-size hybrid knobs are 0.3--0.7 points (mean-6, vs.\ the default)
 against a seed spread of about 0.3--0.5 points among those same knobs.
+
+\subsection{Teachers and code-embedding initialization}
+\label{sec:ablate3}
+
+A fourth grid (\code{ablate3-desynpuf}, complete) asks two further questions
+at the same base size, budget and full-held-out protocol as
+Section~\ref{sec:ablate2}: can a frozen pretrained teacher replace EMA as the
+target encoder, and does initializing the code embedding table from text
+descriptions of each code help either objective? Five configurations, two
+seeds each. \code{hybrid\_frozen\_ar} sets \code{model.target\_mode: frozen}
+and loads the target embedding and encoder from the 1B-token
+\code{scale1b-desynpuf} \code{ar} checkpoint, never updating it.
+\code{hybrid\_frozen\_ar\_init} additionally initializes the \emph{student}
+from that checkpoint (\code{model.init\_from}), separating the value of a
+pretrained target from the value of a pretrained student.
+\code{hybrid\_textinit} and \code{ar\_textinit} replace the $\mathcal{N}(0,
+0.02)$ code table with projected sentence embeddings of each code's
+description under both objectives; \code{hybrid\_textinit\_frozen} freezes
+that table.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{\code{ablate3-desynpuf}, full held-out split, 200M nominal token
+slots per cell, 2-seed means. \emph{mean-6} excludes
+\code{mortality\_365d}; \emph{mean-7} includes it; \emph{seed spread} is the
+per-task $|s1-s2|$ averaged over the six non-mortality tasks. References:
+\code{hybrid\_base\_s0} (EMA default, seed 0) and \code{ar\_base\_s0} (seed
+0) are Table~\ref{tab:ablate2size}'s base row; \code{hybrid\_nosig} is
+Table~\ref{tab:ablate2knobs}'s no-SIGReg row.}
+\label{tab:ablate3}
+\begin{tabular}{lrrr}
+\toprule
+config & mean-6 & mean-7 & seed spread \\
+\midrule
+\code{hybrid\_frozen\_ar} & \best{0.7615} & 0.7404 & 0.0036 \\
+\code{hybrid\_frozen\_ar\_init} & 0.7559 & 0.7359 & 0.0013 \\
+\code{hybrid\_textinit} & 0.7561 & 0.7367 & 0.0022 \\
+\code{hybrid\_textinit\_frozen} & 0.7546 & 0.7344 & 0.0053 \\
+\code{ar\_textinit} & 0.7490 & 0.7283 & 0.0052 \\
+\midrule
+\code{hybrid\_base\_s0} (EMA default) & 0.7554 & 0.7345 & --- \\
+\code{hybrid\_nosig} (no SIGReg) & 0.7615 & --- & --- \\
+\code{ar\_base\_s0} & 0.7507 & 0.7315 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Findings.} The frozen AR teacher gains $+0.6$ (mean-6) over the
+EMA default (0.7615 vs.\ 0.7554) --- the same value, and the same gain, as
+the no-SIGReg result in Section~\ref{sec:ablate2}. Initializing the student
+from the same checkpoint removes the gain (\code{hybrid\_frozen\_ar\_init}
+0.7559 vs.\ 0.7554, $+0.0005$): the frozen-teacher gain is a property of the
+target, not of a pretrained student. Text-initialized code embeddings are
+neutral for both objectives (\code{hybrid\_textinit} $+0.0007$ over the EMA
+default, \code{ar\_textinit} $-0.0017$ against \code{ar\_base\_s0}, both
+inside the 0.0022--0.0052 seed spread on these cells). Freezing the text
+table costs 0.1 (0.7561 vs.\ 0.7546) while removing 58\% of the trainable
+parameters --- the code table is 7{,}680{,}000 of the base-size hybrid's
+13{,}208{,}336 trainable parameters; freezing it leaves 5{,}528{,}336
+trainable. \code{ablate4-desynpuf} (running) puts the frozen AR teacher and
+$\lambda_{\mathrm{sig}} = 0$ in the same cell, two seeds, to test whether the
+two gains stack.
 
 %==============================================================================
 \section{Discussion}
@@ -1455,6 +1519,32 @@ term at horizons $\{1, 4, 16\}$ supplies. That is a hypothesis consistent
 with the numbers, not something these experiments establish. Note also that
 both families decline on this task as the budget grows, which nothing here
 explains.
+
+\paragraph{A frozen teacher matches the no-SIGReg gain.} The frozen-AR-teacher
+result in Section~\ref{sec:ablate3} (\code{hybrid\_frozen\_ar}, $+0.6$
+mean-6 over the EMA default) sits alongside a growing line of work arguing
+that a target encoder need not be updated at all: \citet{salt} report a
+frozen teacher matching or beating an EMA target for video JEPA at a fraction
+of the compute, since no backward pass or momentum update is spent on it.
+The result here is consistent with that reading in one respect --- a fixed
+target function was sufficient, here supplied by an AR checkpoint rather than
+a randomly initialized or contrastively pretrained one --- and differs from
+it in that the confound between a better target and a pretrained student
+(Section~\ref{sec:ablate3}) is exactly what \code{hybrid\_frozen\_ar\_init}
+isolates and finds is not where the gain comes from. Whether the two frozen-teacher
+results generalize to each other's domains is not tested here.
+
+\paragraph{A frozen text-initialized table is future work for cross-vocabulary
+transfer.} \code{hybrid\_textinit\_frozen} (Section~\ref{sec:ablate3}) fixes
+the code embedding table to sentence embeddings of each code's description
+rather than letting it train, at a cost of 0.1 mean-6 against the trainable
+text-init table. A frozen table built from code \emph{descriptions} rather
+than from a vocabulary index does not require the pretraining and downstream
+vocabularies to share a token ID space; a code absent from pretraining but
+present downstream (or in a different coding system entirely) still gets a
+lookup vector. Testing that transfer is not done here --- every cell in this
+paper pretrains and evaluates on the same DE-SynPUF vocabulary --- and is
+left for future work.
 
 \subsection{What the evidence does not support}
 
