@@ -1,0 +1,171 @@
+{
+  "grid": "ablate4-desynpuf",
+  "base": "configs/pretrain_scale.yaml",
+  "runs": [
+    {
+      "run": "hybrid_nosig_frozen_s1",
+      "objective": "nextlatent",
+      "pooling": "last@final",
+      "reuse_checkpoint": null,
+      "target_mode": "frozen",
+      "lambda_sigreg": 0.0,
+      "p_future": null,
+      "steps": 6104,
+      "tokens": 200015872,
+      "batch_size": 64,
+      "max_len": 512,
+      "overrides": {
+        "run.seed": 1,
+        "objective.kind": "nextlatent",
+        "model.causal": true,
+        "model.target_mode": "frozen",
+        "model.target_init": "runs/scale1b-desynpuf/ar/final.pt",
+        "objective.horizons": [
+          1,
+          4,
+          16
+        ],
+        "objective.lambda_recon": 0.1,
+        "objective.lambda_sigreg": 0.0
+      },
+      "final": {
+        "step": 6104.0,
+        "loss": 0.8552730083465576,
+        "pred_loss": 0.2818860709667206,
+        "sigreg_tokens": 0.0,
+        "sigreg_cls": 0.0,
+        "recon_loss": 5.733869552612305,
+        "recon_value_loss": 0.0,
+        "ce": 5.733869552612305,
+        "top1": 0.21010152995586395,
+        "top10": 0.40054672956466675,
+        "lr": 3.0000203289443152e-06,
+        "grad_norm": 0.06800518184900284,
+        "tokens_per_s": 22942.204564819156,
+        "mean_std": 1.0452029705047607,
+        "effective_rank": 181.48739624023438,
+        "cos_real": 0.5499857664108276,
+        "cos_shuffled": 0.5478192567825317,
+        "cos_gap": 0.0021665096282958984,
+        "ema_momentum": NaN,
+        "peak_memory_mb": 5166.470703125,
+        "elapsed_s": 2357.8949969100067,
+        "skipped_frac": NaN,
+        "positives_per_anchor": NaN,
+        "wall_s": 2362.1
+      },
+      "auroc": {
+        "mortality_365d": 0.6175028698096029,
+        "inpatient_365d": 0.7563389402211207,
+        "readmission_30d": 0.6922795391545392,
+        "new_dx_365d/diabetes": 0.7767941874744551,
+        "new_dx_365d/heart_failure": 0.7958008108280838,
+        "new_dx_365d/ckd": 0.7812017003588049,
+        "new_dx_365d/copd": 0.7710580967339982
+      },
+      "finished": "2026-09-08T14:03:24+00:00"
+    },
+    {
+      "run": "hybrid_nosig_frozen_s2",
+      "objective": "nextlatent",
+      "pooling": "last@final",
+      "reuse_checkpoint": null,
+      "target_mode": "frozen",
+      "lambda_sigreg": 0.0,
+      "p_future": null,
+      "steps": 6104,
+      "tokens": 200015872,
+      "batch_size": 64,
+      "max_len": 512,
+      "overrides": {
+        "run.seed": 2,
+        "objective.kind": "nextlatent",
+        "model.causal": true,
+        "model.target_mode": "frozen",
+        "model.target_init": "runs/scale1b-desynpuf/ar/final.pt",
+        "objective.horizons": [
+          1,
+          4,
+          16
+        ],
+        "objective.lambda_recon": 0.1,
+        "objective.lambda_sigreg": 0.0
+      },
+      "final": {
+        "step": 6104.0,
+        "loss": 0.8548210859298706,
+        "pred_loss": 0.2807045876979828,
+        "sigreg_tokens": 0.0,
+        "sigreg_cls": 0.0,
+        "recon_loss": 5.741164684295654,
+        "recon_value_loss": 0.0,
+        "ce": 5.741164684295654,
+        "top1": 0.2212502509355545,
+        "top10": 0.4056418240070343,
+        "lr": 3.0000203289443152e-06,
+        "grad_norm": 0.05217493698000908,
+        "tokens_per_s": 26937.34555022566,
+        "mean_std": 1.0354039669036865,
+        "effective_rank": 181.05874633789062,
+        "cos_real": 0.5526542067527771,
+        "cos_shuffled": 0.5540454387664795,
+        "cos_gap": -0.0013912320137023926,
+        "ema_momentum": NaN,
+        "peak_memory_mb": 5236.71240234375,
+        "elapsed_s": 2010.0483309390256,
+        "skipped_frac": NaN,
+        "positives_per_anchor": NaN,
+        "wall_s": 2013.7
+      },
+      "auroc": {
+        "mortality_365d": 0.6133990420773464,
+        "inpatient_365d": 0.7588923511409836,
+        "readmission_30d": 0.694057519057519,
+        "new_dx_365d/diabetes": 0.7759090966549138,
+        "new_dx_365d/heart_failure": 0.795598312210493,
+        "new_dx_365d/ckd": 0.779579995306147,
+        "new_dx_365d/copd": 0.7713591074233389
+      },
+      "finished": "2026-09-08T14:40:24+00:00"
+    }
+  ],
+  "baselines": {
+    "gbm": {
+      "inpatient_365d": 0.7455354437475381,
+      "mortality_365d": 0.5564135296678937,
+      "new_dx_365d/ckd": 0.7712966398778753,
+      "new_dx_365d/copd": 0.7676594926979246,
+      "new_dx_365d/diabetes": 0.7709418433766133,
+      "new_dx_365d/heart_failure": 0.7840384082798201,
+      "readmission_30d": 0.6670239951489952
+    },
+    "lr": {
+      "inpatient_365d": 0.7124207514111908,
+      "mortality_365d": 0.5658631199778332,
+      "new_dx_365d/ckd": 0.7390260043682433,
+      "new_dx_365d/copd": 0.7325724120480661,
+      "new_dx_365d/diabetes": 0.7367579317574143,
+      "new_dx_365d/heart_failure": 0.7407228077585337,
+      "readmission_30d": 0.6529365904365904
+    },
+    "random_init@hybrid_nosig_frozen_s1": {
+      "inpatient_365d": 0.6741953940016148,
+      "mortality_365d": 0.5405909828603096,
+      "new_dx_365d/ckd": 0.6857351800050322,
+      "new_dx_365d/copd": 0.6906223592936156,
+      "new_dx_365d/diabetes": 0.7185401830295715,
+      "new_dx_365d/heart_failure": 0.689703576294625,
+      "readmission_30d": 0.6166168572418573
+    }
+  },
+  "source": "desynpuf-s1",
+  "updated": "2026-09-08T14:40:24+00:00",
+  "eval": {
+    "bootstrap": 200,
+    "eval_subject_limit": null,
+    "eval_subject_seed": 0,
+    "seed": 0,
+    "probe_features": "auto",
+    "probe_layer": "final"
+  }
+}
