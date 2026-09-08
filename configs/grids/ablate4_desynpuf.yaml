@@ -1,0 +1,113 @@
+# Third-generation ablation: where the representation comes from, rather than
+# how big the model is. Two mechanisms, both new in this repository, both aimed
+# at the same observation -- a base-size model is 58% code-embedding table, and
+# the target network is the other thing the hybrid depends on. See
+# docs/experiments/ablate3-desynpuf/README.md for the four questions; this file
+# is the mechanism, not the rationale.
+#
+# Base config: configs/pretrain_scale.yaml (6-layer/256-wide encoder,
+# max_len 512, batch 64), 200M nominal token slots per cell -- the same
+# per-cell budget as scale-desynpuf and ablate2-desynpuf, so a row here reads
+# directly against a row there.
+#
+#   Target axis (`model.target_mode: frozen`):
+#     hybrid_frozen_ar       the hybrid with its EMA teacher replaced by a
+#                            *fixed* one: embedding + encoder loaded from
+#                            runs/scale1b-desynpuf/ar/final.pt and never
+#                            updated. No momentum schedule, no chance of the
+#                            two networks drifting together, and the target is
+#                            a fixed function of the input from step zero.
+#     hybrid_frozen_ar_init  the same, plus `model.init_from` pointing at that
+#                            same checkpoint, so the student *starts* as the
+#                            teacher. Separating the two is the point: "a
+#                            pretrained teacher helps" and "pretrained weights
+#                            help" are different claims and this grid does not
+#                            let one stand in for the other.
+#
+#   Code-embedding axis (`model.code_init: text`):
+#     hybrid_textinit        code embeddings initialized from sentence
+#                            embeddings of each code's description
+#                            (ehrjepa.data.code_text), still trainable.
+#     hybrid_textinit_frozen the same table, `model.freeze_code_embeddings:
+#                            true` -- 7.68M of the hybrid's 13.21M trainable
+#                            parameters removed (58%), leaving 5.53M, and the
+#                            code channel becomes a fixed lookup.
+#     ar_textinit            the same initialization under the plain AR
+#                            objective, so "text init helps" is not a claim
+#                            about one objective's quirk.
+#
+# The two `model.target_init` / `model.init_from` checkpoints live on the GPU
+# machine that trained scale1b-desynpuf, not in this worktree. Unlike
+# `reuse_checkpoint` -- which scripts/ablate.py plans around a missing file --
+# these are *training* overrides, read by the trainer when the cell actually
+# runs. `--dry-run` never constructs a model, so it does not need them; the run
+# does, and fails at construction naming the path if it is absent.
+#
+# `model.code_init: text` needs data/cache/desynpuf-s1/code_init_text_256.npy.
+# That table is a derived artifact and is not committed (see .gitignore); build
+# it on the machine that will train with
+#
+#   python -m ehrjepa.data.code_text build --cache data/cache/desynpuf-s1 --width 256
+#
+# and check its coverage against the committed
+# docs/experiments/ablate3-desynpuf/code_init_text_256.json before starting.
+# `PretrainConfig.model_config` derives the path from `data.cache_dir` and
+# `model.dim`, so no cell names it.
+#
+# Every trained cell gets two seeds (1 and 2), and every seed-1 cell is listed
+# before any seed-2 cell so an interrupted or `--only` restricted run finishes
+# one seed's worth first.
+#
+# `eval_subject_limit: null` scores every held-out subject, as ablate2 does.
+# That cohort does not match 2026-09-03-eval-desynpuf/predictions.parquet's
+# 3,000-subject one, so `reuse_predictions` is left unset and scripts/ablate.py
+# fits `lr`/`gbm` fresh, once, on whichever cell's eval command runs first.
+
+name: ablate4-desynpuf
+base: configs/pretrain_scale.yaml
+source: desynpuf-s1
+budget_tokens: 200000000
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# Every cell here is a 6L/256d *causal* encoder -- the frozen-target and
+# text-init knobs change what the weights are initialized to and what the loss
+# pulls on, not the architecture the probe sees -- so one untrained control
+# covers the whole grid. `random_init` rebuilds the checkpoint's own config
+# through `EHRJEPAConfig.for_reload`, which drops `target_init`/`init_from`/
+# `code_init`, so the control really is untrained rather than accidentally
+# carrying the teacher's or the text table's weights.
+control_runs: [hybrid_nosig_frozen_s1]
+
+runs:
+  - name: hybrid_nosig_frozen_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: frozen
+      model.target_init: runs/scale1b-desynpuf/ar/final.pt
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_nosig_frozen_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: frozen
+      model.target_init: runs/scale1b-desynpuf/ar/final.pt
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+
