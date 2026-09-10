@@ -69,9 +69,12 @@ from ehrjepa.models.encoder import Encoder
 from ehrjepa.models.predictor import Predictor
 from ehrjepa.models.pretrained import load_encoder_weights
 
-__all__ = ["EHRJEPA", "EHRJEPAConfig", "ema_momentum"]
+__all__ = ["EHRJEPA", "EHRJEPAConfig", "build_event_stack", "effective_valid", "ema_momentum"]
 
 TARGET_MODES = ("shared", "ema", "frozen")
+
+#: ``model.encoder``: the from-scratch stack, or the pretrained language model.
+ENCODER_KINDS = ("scratch", "lm")
 
 #: The target modes that allocate a second embedding+encoder pair.
 TARGET_COPY_MODES = ("ema", "frozen")
@@ -153,6 +156,38 @@ class EHRJEPAConfig:
     recon_head: bool = False
     #: Build the auxiliary ``value_bin`` head (``objective.recon_value``).
     recon_value_head: bool = False
+    #: Build the continuous ``value_z`` regression head (``objective.lambda_value``).
+    #: ``dim -> 1``; the loss masks it to targets whose ``value_bin`` is non-zero.
+    value_head: bool = False
+
+    #: Which event stack runs: ``scratch`` is this repository's
+    #: :class:`~ehrjepa.models.embedding.EventEmbedding` + RoPE
+    #: :class:`~ehrjepa.models.encoder.Encoder`; ``lm`` serialises each event to a
+    #: short text span and reads the event representation off a frozen pretrained
+    #: causal language model with LoRA adapters
+    #: (:mod:`ehrjepa.models.lm`).
+    encoder: str = "scratch"
+    #: ``encoder: lm`` only: the Hugging Face model id. Its tokenizer is used
+    #: unless ``lm_tokenizer`` names another, and both are recorded in the
+    #: checkpoint's model config so ``load_encoder`` rebuilds the same stack.
+    lm_name: str = "Qwen/Qwen2.5-0.5B"
+    #: Tokenizer id, when it differs from ``lm_name``.
+    lm_tokenizer: str | None = None
+    #: Hard cap on tokens per window. A window over the cap is truncated from the
+    #: *left* (the oldest events are dropped), which is why ``last`` pooling and
+    #: the causal next-latent targets are unaffected by it.
+    lm_max_tokens: int = 2048
+    lm_lora_r: int = 8
+    lm_lora_alpha: int = 16
+    #: Comma-separated LoRA target module names. The default is Qwen2's attention
+    #: projections; a GPT-2 shaped model wants ``c_attn``.
+    lm_lora_targets: str = "q_proj,k_proj,v_proj,o_proj"
+    lm_grad_checkpointing: bool = True
+    #: The cache directory whose ``vocab.parquet`` supplies each code's words and
+    #: whose ``quantizer.parquet`` supplies the per-code mean/std that turn
+    #: ``value_z`` back into a printable number. Filled in from ``data.cache_dir``
+    #: by :meth:`PretrainConfig.model_config`.
+    lm_cache_dir: str | None = None
 
     #: Build the transformer :class:`~ehrjepa.models.predictor.Predictor`. The
     #: causal latent objectives in :mod:`ehrjepa.models.latent` replace it with
@@ -184,6 +219,58 @@ class EHRJEPAConfig:
             )
         if self.code_init == "text" and not self.code_init_path:
             raise ValueError("code_init='text' needs model.code_init_path to name a .npy table")
+        if self.encoder not in ENCODER_KINDS:
+            raise ValueError(f"model.encoder must be one of {ENCODER_KINDS}, got {self.encoder!r}")
+        if self.encoder == "lm":
+            self._check_lm()
+
+    def _check_lm(self) -> None:
+        """What ``encoder: lm`` needs, and the three knobs it cannot honour.
+
+        Each rejection is a thing the LM stack genuinely has no counterpart for,
+        and each is better a construction-time error than a silently ignored
+        setting:
+
+        (``objective.kind: jepa`` is rejected one level up, by
+        :meth:`~ehrjepa.train.config.PretrainConfig.model_config`, which is the
+        only place that sees both the objective and the model section.)
+
+        ``target_mode`` other than ``shared``
+            An EMA or frozen teacher is a *second copy* of the encoder. For a
+            0.5B base that is another gigabyte of weights resident and another
+            gigabyte written into every checkpoint, for a teacher whose frozen
+            trunk is bit-identical to the student's. The shared-weight target --
+            the same forward pass under stop-gradient -- is what this repository
+            calls ``shared`` and is the only target mode offered here.
+        ``objective.kind: jepa``
+            Masked-span JEPA drops context positions with a key-side attention
+            mask. A serialised text window has no such mask: dropping an event
+            means re-tokenising the window. The causal objectives (``ar``,
+            ``nextlatent``) need no context mask at all.
+        ``target.span_only`` / ``model.share_time_encoders`` / ``code_init: text``
+            All three reach into :class:`~ehrjepa.models.embedding.EventEmbedding`
+            internals -- a span re-embedding, the Fourier time encoders, the code
+            table as the model's view of a code -- that the LM stack does not have.
+        """
+        if not self.lm_cache_dir:
+            raise ValueError(
+                "model.encoder='lm' needs model.lm_cache_dir to name the cache whose "
+                "vocab.parquet and quantizer.parquet describe each code in words"
+            )
+        if self.target_mode != "shared":
+            raise ValueError(
+                f"model.encoder='lm' supports target_mode='shared' only, got "
+                f"{self.target_mode!r}: a second copy of the base model does not fit"
+            )
+        if self.target_span_only:
+            raise ValueError("model.encoder='lm' cannot honour target.span_only")
+        if self.share_time_encoders:
+            raise ValueError("model.encoder='lm' has no Fourier time encoders to share")
+        if self.code_init != "random":
+            raise ValueError(
+                f"model.encoder='lm' reads code descriptions itself; "
+                f"code_init={self.code_init!r} has nothing to initialize"
+            )
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> EHRJEPAConfig:
@@ -207,6 +294,70 @@ class EHRJEPAConfig:
         return replace(self, target_init=None, init_from=None, code_init="random")
 
 
+def build_event_stack(
+    config: EHRJEPAConfig, *, time_dropout: float = 0.0, causal: bool = False
+) -> tuple[nn.Module, nn.Module]:
+    """``(embedding, encoder)`` for ``config.encoder``, in that construction order.
+
+    The order and the argument lists of the ``scratch`` branch are exactly what
+    :class:`EHRJEPA` and :class:`~ehrjepa.models.ar.EHRAR` used before this
+    function existed, so the number and sequence of RNG draws -- and therefore
+    every recorded checksum -- is unchanged. ``time_dropout`` and ``causal`` are
+    parameters rather than reads of ``config`` because the two callers differ on
+    both: the AR model has never applied time-feature dropout and is always
+    causal.
+
+    The ``lm`` branch returns a
+    :class:`~ehrjepa.models.lm.LMEventTokenizer` and a
+    :class:`~ehrjepa.models.lm.LMEncoder`, which honour the same two-call
+    protocol (``embed(...)`` then ``encoder(tokens, valid_mask)``) so the models,
+    the trainer and :mod:`ehrjepa.eval.probe` need no branch of their own.
+    """
+    if config.encoder == "lm":
+        # Imported here so that `import ehrjepa.models` does not require
+        # transformers/peft, which are the optional `lm` extra.
+        from ehrjepa.models.lm import LMEncoder, LMEventTokenizer
+
+        return LMEventTokenizer(config), LMEncoder(config)
+    embed = EventEmbedding(
+        config.vocab_size,
+        config.dim,
+        n_freq=config.n_freq,
+        dropout=config.dropout,
+        time_dropout=time_dropout,
+        code_init=config.code_init,
+        code_init_path=config.code_init_path,
+        freeze_code_embeddings=config.freeze_code_embeddings,
+    )
+    encoder = Encoder(
+        config.dim,
+        config.depth,
+        config.heads,
+        mlp=config.mlp,
+        mlp_ratio=config.mlp_ratio,
+        dropout=config.dropout,
+        attn_dropout=config.attn_dropout,
+        causal=causal,
+    )
+    return embed, encoder
+
+
+def effective_valid(tokens: object, valid: Tensor) -> Tensor:
+    """``valid``, intersected with the events the encoder's input actually kept.
+
+    The from-scratch stack keeps everything -- one event in, one token out -- and
+    this is the identity. The LM stack caps a window at ``model.lm_max_tokens``
+    and drops the oldest events that do not fit, reporting them in
+    ``LMTokens.kept``; a dropped event has no hidden state, so it must not be
+    scored, attended to as a target, or pooled over.
+    """
+    kept = getattr(tokens, "kept", None)
+    # Always ``bool``: callers use the result both as an attention mask (where an
+    # integer tensor is harmless) and as a boolean index (where it is not -- an
+    # integer tensor there selects rows by position instead of by predicate).
+    return valid.bool() if kept is None else valid.bool() & kept.bool()
+
+
 @dataclass
 class JEPAOutput:
     """One forward pass, with everything the loss and the diagnostics need."""
@@ -226,25 +377,8 @@ class EHRJEPA(nn.Module):
     def __init__(self, config: EHRJEPAConfig) -> None:
         super().__init__()
         self.config = config
-        self.embed = EventEmbedding(
-            config.vocab_size,
-            config.dim,
-            n_freq=config.n_freq,
-            dropout=config.dropout,
-            time_dropout=config.time_feature_dropout,
-            code_init=config.code_init,
-            code_init_path=config.code_init_path,
-            freeze_code_embeddings=config.freeze_code_embeddings,
-        )
-        self.encoder = Encoder(
-            config.dim,
-            config.depth,
-            config.heads,
-            mlp=config.mlp,
-            mlp_ratio=config.mlp_ratio,
-            dropout=config.dropout,
-            attn_dropout=config.attn_dropout,
-            causal=config.causal,
+        self.embed, self.encoder = build_event_stack(
+            config, time_dropout=config.time_feature_dropout, causal=config.causal
         )
         self.predictor: Predictor | None = None
         if config.build_predictor:
@@ -306,6 +440,12 @@ class EHRJEPA(nn.Module):
             )
         if config.recon_value_head:
             self.recon_value_head = nn.Linear(config.dim, N_VALUE_BINS + 1)
+        # Last, and only when asked for: an unconditional head would add a row to
+        # every checkpoint's ``state_dict`` and take a draw from the RNG stream
+        # that every recorded loss checksum depends on.
+        self.value_head: nn.Module | None = None
+        if config.value_head:
+            self.value_head = nn.Linear(config.dim, 1)
 
     # ------------------------------------------------------------------ #
 
@@ -424,7 +564,9 @@ class EHRJEPA(nn.Module):
         return full[:, :length]
 
     @torch.no_grad()
-    def window_targets(self, batch: Mapping[str, Tensor], tokens: Tensor) -> Tensor:
+    def window_targets(
+        self, batch: Mapping[str, Tensor], tokens: Tensor, hidden: Tensor | None = None
+    ) -> Tensor:
         """Target latents for **every** position of the window, under ``no_grad``.
 
         Which stack runs is the same decision :meth:`forward` makes for the
@@ -433,12 +575,25 @@ class EHRJEPA(nn.Module):
         have none): the EMA copy when there is one, a content-only re-embedding
         when ``target.time_features`` is off, and otherwise the online tokens run
         through the online encoder under stop-gradient.
+
+        ``hidden`` is the online pass's output, offered by the caller as a
+        shortcut for the one case where the second forward is provably redundant:
+        the LM stack under shared targets with the time terms on. There the
+        target pass would re-run the *same* frozen base on the *same* token ids
+        with no dropout anywhere, so it returns the same numbers as the online
+        pass at the price of a second 0.5B forward per step. The from-scratch
+        stack does not take this path -- its encoder has residual dropout, so the
+        two passes are genuinely different samples and the existing behaviour is
+        preserved exactly.
         """
+        valid = effective_valid(tokens, batch["attention_mask"])
         if self.uses_target_copy or not self.config.target_time_features:
             target_tokens = self.embed_batch(batch, target_side=True)
             _, encoder = self._target_stack
-            return encoder(target_tokens, batch["attention_mask"]).tokens.detach()
-        return self.encoder(tokens.detach(), batch["attention_mask"]).tokens.detach()
+            return encoder(target_tokens, effective_valid(target_tokens, valid)).tokens.detach()
+        if hidden is not None and self.config.encoder == "lm":
+            return hidden.detach()
+        return self.encoder(tokens.detach(), valid).tokens.detach()
 
     def forward(
         self,
@@ -484,6 +639,9 @@ class EHRJEPA(nn.Module):
             extras["recon_code_id"] = batch["code_id"][index]
         if self.recon_value_head is not None:
             extras["recon_value_bin"] = batch["value_bin"][index]
+        if self.value_head is not None:
+            extras["value_target_z"] = batch["value_z"][index]
+            extras["value_target_bin"] = batch["value_bin"][index]
         return JEPAOutput(
             predictions=predictions,
             targets=targets,

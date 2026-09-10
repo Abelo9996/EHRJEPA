@@ -89,6 +89,12 @@ LOG_COLUMNS = (
     # columns are pinned by tests as the contract two readers already depend on.
     "skipped_frac",
     "positives_per_anchor",
+    # The continuous ``value_z`` Huber term (``objective.lambda_value``), which
+    # every objective can carry and which is empty in a run that does not.
+    "value_loss",
+    # Fraction of a window's events the LM stack's token cap kept
+    # (``model.encoder: lm`` only; 1.0 whenever nothing was truncated).
+    "lm_events_kept",
 )
 
 
@@ -186,7 +192,11 @@ class Trainer:
                 print("[note] objective.kind=ar implies model.causal=true; enabling it", flush=True)
                 self.model_config.causal = True
             self.model = EHRAR(self.model_config).to(self.device)
-            self.objective: nn.Module = ARObjective(chunk=config.objective.ar_chunk).to(self.device)
+            self.objective: nn.Module = ARObjective(
+                chunk=config.objective.ar_chunk,
+                lambda_value=config.objective.lambda_value,
+                value_head=self.model.value_head,
+            ).to(self.device)
         elif self.kind in LATENT_KINDS:
             if not self.model_config.causal:
                 # Both latent objectives take their context summary from a causal
@@ -198,15 +208,18 @@ class Trainer:
                 )
                 self.model_config.causal = True
             self.model = LATENT_MODELS[self.kind](self.model_config).to(self.device)
-            self.objective = LatentObjective(config.objective, recon_head=self.model.recon_head).to(
-                self.device
-            )
+            self.objective = LatentObjective(
+                config.objective,
+                recon_head=self.model.recon_head,
+                value_head=self.model.value_head,
+            ).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
             self.objective = JEPAObjective(
                 config.objective,
                 recon_head=self.model.recon_head,
                 recon_value_head=self.model.recon_value_head,
+                value_head=self.model.value_head,
             ).to(self.device)
         self.optimizer = torch.optim.AdamW(
             param_groups(self.model, config.optim.weight_decay),
@@ -333,7 +346,13 @@ class Trainer:
     def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], object]:
         if self.kind == "ar":
             output = self.model(batch)
-            stats = self.objective(self.model.head, output.hidden, output.targets)
+            stats = self.objective(
+                self.model.head,
+                output.hidden,
+                output.targets,
+                value_z=output.value_z,
+                value_bin=output.value_bin,
+            )
             return dict(stats), output
         # lambda_pred == 0 means nothing pulls on the target latent, so the
         # target pass is pure waste; skip it, for every latent objective.
@@ -447,6 +466,13 @@ class Trainer:
                     "peak_memory_mb": self._peak_memory / 2**20,
                     "elapsed_s": now - started,
                 }
+                # ``model.encoder: lm`` only: what fraction of the last batch's
+                # events survived the token cap. The tokenizer stage records it
+                # because it is the only thing that knows, and it is a
+                # diagnostic, not a gradient path.
+                kept = getattr(self.model.embed, "last_kept_frac", None)
+                if kept is not None:
+                    row["lm_events_kept"] = kept
                 self._log(row)
                 last = {k: float(v) for k, v in row.items()}
                 window_tokens = 0
@@ -473,6 +499,8 @@ class Trainer:
                     self._writer.add_scalar(f"train/{name}", value, self.step)
         if self.kind == "ar":
             body = "ce {ce:.4f} top1 {top1:.3f} top10 {top10:.3f}"
+            if self.config.objective.lambda_value != 0.0:
+                body += " val {value_loss:.4f}"
         else:
             body = "pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} sig_cls {sigreg_cls:.4f}"
             if self.config.objective.lambda_recon != 0.0:
@@ -483,6 +511,8 @@ class Trainer:
                     body += " pos {positives_per_anchor:.1f}"
                 elif self.config.objective.recon_value:
                     body += " recon_val {recon_value_loss:.4f}"
+            if self.config.objective.lambda_value != 0.0:
+                body += " val {value_loss:.4f}"
             if self.kind == "window":
                 body += " skip {skipped_frac:.3f}"
         print(

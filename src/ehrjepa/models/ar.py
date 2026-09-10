@@ -26,9 +26,7 @@ import torch
 from torch import Tensor, nn
 
 from ehrjepa.data.tokenize import PAD_ID
-from ehrjepa.models.embedding import EventEmbedding
-from ehrjepa.models.encoder import Encoder
-from ehrjepa.models.jepa import EHRJEPAConfig
+from ehrjepa.models.jepa import EHRJEPAConfig, build_event_stack, effective_valid
 from ehrjepa.models.pretrained import load_encoder_weights
 from ehrjepa.objectives.ar import NextCodeHead, next_code_targets
 
@@ -50,6 +48,12 @@ class AROutput:
     tokens: Tensor  # (B, L, dim)
     cls: Tensor  # (B, dim)
     valid_mask: Tensor  # (B, L) bool
+    #: The *next* event's ``value_z`` and ``value_bin`` at the scored positions,
+    #: for ``objective.lambda_value``. Gathered unconditionally -- two index
+    #: operations on tensors already in memory -- so a run that does not ask for
+    #: the term pays nothing measurable and computes nothing different.
+    value_z: Tensor | None = None  # (n_targets,)
+    value_bin: Tensor | None = None  # (n_targets,)
 
 
 class EHRAR(nn.Module):
@@ -60,30 +64,17 @@ class EHRAR(nn.Module):
         if not config.causal:
             raise ValueError("the autoregressive model needs model.causal=true")
         self.config = config
-        self.embed = EventEmbedding(
-            config.vocab_size,
-            config.dim,
-            n_freq=config.n_freq,
-            dropout=config.dropout,
-            code_init=config.code_init,
-            code_init_path=config.code_init_path,
-            freeze_code_embeddings=config.freeze_code_embeddings,
-        )
-        self.encoder = Encoder(
-            config.dim,
-            config.depth,
-            config.heads,
-            mlp=config.mlp,
-            mlp_ratio=config.mlp_ratio,
-            dropout=config.dropout,
-            attn_dropout=config.attn_dropout,
-            causal=True,
-        )
+        self.embed, self.encoder = build_event_stack(config, causal=True)
         self.head = NextCodeHead(
             config.dim,
             config.vocab_size,
             tied_weight=self.embed.code_emb.weight if config.tie_embeddings else None,
         )
+        # After the head, and only when ``objective.lambda_value`` asks for it, so
+        # the RNG stream of every existing AR run is untouched.
+        self.value_head: nn.Module | None = None
+        if config.value_head:
+            self.value_head = nn.Linear(config.dim, 1)
         if config.init_from:
             for note in load_encoder_weights(
                 self.embed, self.encoder, config.init_from, config, "init_from"
@@ -143,14 +134,24 @@ class EHRAR(nn.Module):
         return self.encoder(self.embed_batch(batch), mask).cls
 
     def forward(self, batch: Mapping[str, Tensor]) -> AROutput:
-        valid = batch["attention_mask"].bool()
-        encoded = self.encoder(self.embed_batch(batch), valid)
+        tokens = self.embed_batch(batch)
+        valid = effective_valid(tokens, batch["attention_mask"])
+        encoded = self.encoder(tokens, valid)
         targets = next_code_targets(batch["code_id"], valid)
         keep = targets != PAD_ID
+        # The value of the event being predicted, at the same positions -- so the
+        # regression target is the *next* event's number, exactly as the code
+        # target is the next event's code.
+        shifted_z = torch.zeros_like(batch["value_z"])
+        shifted_z[:, :-1] = batch["value_z"][:, 1:]
+        shifted_bin = torch.zeros_like(batch["value_bin"])
+        shifted_bin[:, :-1] = batch["value_bin"][:, 1:]
         return AROutput(
             hidden=encoded.tokens[keep],
             targets=targets[keep],
             tokens=encoded.tokens,
             cls=encoded.cls,
             valid_mask=valid,
+            value_z=shifted_z[keep],
+            value_bin=shifted_bin[keep],
         )

@@ -57,7 +57,7 @@ from torch import Tensor, nn
 
 from ehrjepa.data.tokenize import PAD_ID
 from ehrjepa.models.encoder import _init_linear
-from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig, JEPAOutput
+from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig, JEPAOutput, effective_valid
 from ehrjepa.models.layers import ScalarEncoder
 from ehrjepa.objectives.ar import next_code_targets
 
@@ -158,15 +158,17 @@ class EHRNextLatent(_CausalLatent):
         ``lambda_recon`` positive that configuration *is* the AR objective, run
         through this class's encoder.
         """
-        valid = batch["attention_mask"].bool()
         tokens = self.embed_batch(batch)
+        valid = effective_valid(tokens, batch["attention_mask"])
         context = self.encoder(tokens, valid)
         hidden = context.tokens
-        targets = self.window_targets(batch, tokens) if compute_targets else None
+        targets = self.window_targets(batch, tokens, hidden) if compute_targets else None
 
         length = hidden.shape[1]
         predictions: list[Tensor] = []
         target_rows: list[Tensor] = []
+        value_z: list[Tensor] = []
+        value_bin: list[Tensor] = []
         sizes: list[int] = []
         rows: list[Tensor] = []
         cols: list[Tensor] = []
@@ -185,6 +187,12 @@ class EHRNextLatent(_CausalLatent):
             target_rows.append(
                 targets[:, step:][keep] if targets is not None else torch.zeros_like(predicted)
             )
+            if self.value_head is not None:
+                # The number carried by the event at ``i + step`` -- the same
+                # event whose latent this head predicts -- in the same row order
+                # as ``predictions``, so the loss can index them together.
+                value_z.append(batch["value_z"][:, step:][keep])
+                value_bin.append(batch["value_bin"][:, step:][keep])
             row, col = keep.nonzero(as_tuple=True)
             rows.append(row)
             cols.append(col)
@@ -201,6 +209,9 @@ class EHRNextLatent(_CausalLatent):
             scored = code_targets != PAD_ID
             extras["recon_hidden"] = hidden[scored]
             extras["recon_code_id"] = code_targets[scored]
+        if self.value_head is not None:
+            extras["value_target_z"] = _cat_index(value_z, hidden).float()
+            extras["value_target_bin"] = _cat_index(value_bin, hidden)
         return JEPAOutput(
             predictions=_cat(predictions, hidden),
             targets=_cat(target_rows, hidden),

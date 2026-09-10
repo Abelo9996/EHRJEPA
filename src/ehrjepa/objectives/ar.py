@@ -206,12 +206,46 @@ def ar_loss_chunked(
 
 
 class ARObjective(nn.Module):
-    """Module wrapper so the trainer can hold the AR loss the way it holds JEPA's."""
+    """Module wrapper so the trainer can hold the AR loss the way it holds JEPA's.
 
-    def __init__(self, chunk: int = AR_CHUNK, top_k: tuple[int, ...] = (1, 10)) -> None:
+    ``lambda_value`` adds the continuous term described in
+    :mod:`ehrjepa.objectives.loss`: a Huber regression from the same hidden row
+    onto the *next* event's ``value_z``, masked to the next events that carry a
+    number. ``value_head`` is the model's own module and is held in a plain list
+    for the same reason :class:`~ehrjepa.objectives.loss.JEPAObjective` holds its
+    heads that way -- registering it here would put one tensor in two
+    ``state_dict``\\ s and twice in the optimizer's weight-decay bookkeeping.
+    """
+
+    def __init__(
+        self,
+        chunk: int = AR_CHUNK,
+        top_k: tuple[int, ...] = (1, 10),
+        lambda_value: float = 0.0,
+        value_head: nn.Module | None = None,
+    ) -> None:
         super().__init__()
         self.chunk = chunk
         self.top_k = top_k
+        self.lambda_value = lambda_value
+        self._heads = [value_head]
 
-    def forward(self, head: nn.Module, hidden: Tensor, targets: Tensor) -> ARStats:
-        return ar_loss_chunked(head, hidden, targets, chunk=self.chunk, top_k=self.top_k)
+    def forward(
+        self,
+        head: nn.Module,
+        hidden: Tensor,
+        targets: Tensor,
+        value_z: Tensor | None = None,
+        value_bin: Tensor | None = None,
+    ) -> ARStats:
+        stats = ar_loss_chunked(head, hidden, targets, chunk=self.chunk, top_k=self.top_k)
+        if self.lambda_value != 0.0:
+            # Imported here, not at module scope: ``objectives.loss`` imports this
+            # module for ``ar_loss_chunked``, so a top-level import would close
+            # the cycle.
+            from ehrjepa.objectives.loss import value_regression_loss
+
+            value = value_regression_loss(self._heads[0], hidden, value_z, value_bin)
+            stats["loss"] = stats["loss"] + self.lambda_value * value
+            stats["value_loss"] = value.detach()
+        return stats

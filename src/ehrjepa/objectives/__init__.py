@@ -33,16 +33,19 @@ from ehrjepa.objectives.latent import LatentObjective, multilabel_bce_chunked
 from ehrjepa.objectives.loss import (
     LATENT_KINDS,
     OBJECTIVE_KINDS,
+    VALUE_HUBER_DELTA,
     JEPAObjective,
     ObjectiveConfig,
     collapse_diagnostics,
     jepa_loss,
+    value_regression_loss,
 )
 from ehrjepa.objectives.sigreg import SIGReg, epps_pulley, random_directions, sigreg
 
 __all__ = [
     "LATENT_KINDS",
     "OBJECTIVE_KINDS",
+    "VALUE_HUBER_DELTA",
     "ARObjective",
     "ARStats",
     "JEPAObjective",
@@ -63,4 +66,5 @@ __all__ = [
     "sample_anchors",
     "sample_masks",
     "sigreg",
+    "value_regression_loss",
 ]

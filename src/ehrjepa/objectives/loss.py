@@ -35,6 +35,18 @@ one step off its usual place). It is an auxiliary that forces the predicted
 latent to carry code identity, which the first pilot grid's probes said the JEPA
 encoders were discarding. ``recon_value`` adds the same for the 11-way
 ``value_bin``. Both are logged separately from the prediction loss.
+
+``lambda_value`` adds a fourth, also off by default: a Huber regression from the
+same output onto the target event's ``value_z`` -- the per-code z-score the cache
+already stores -- masked to the targets that carry a number at all. On claims
+data that mask covers a few percent of events and the term is close to noise; on
+continuous ICU state (99% of PhysioNet-2019 events are numeric) it is the whole
+content of the record, and predicting the *decile* through ``recon_value``
+throws away everything inside the bin. The two are independent knobs: a cell may
+run either, both, or neither, and ``value_loss`` is logged on its own so "the
+continuous term is learning" and "the code term is learning" are separate
+readings. Pure-latent remains ``lambda_recon: 0``, ``recon_value: false``,
+``lambda_value: 0``.
 """
 
 from __future__ import annotations
@@ -54,11 +66,48 @@ from ehrjepa.objectives.sigreg import DEFAULT_N_DIRECTIONS, SIGReg
 __all__ = [
     "LATENT_KINDS",
     "OBJECTIVE_KINDS",
+    "VALUE_HUBER_DELTA",
     "JEPAObjective",
     "ObjectiveConfig",
     "collapse_diagnostics",
     "jepa_loss",
+    "value_regression_loss",
 ]
+
+#: The Huber transition point of the ``lambda_value`` term. ``value_z`` is a
+#: z-score clipped to +-5, so 1.0 puts the quadratic region over the bulk of the
+#: distribution and the linear region over the tails, where a single mismeasured
+#: lab value must not dominate the gradient.
+VALUE_HUBER_DELTA = 1.0
+
+
+def value_regression_loss(
+    head: nn.Module | None,
+    hidden: Tensor,
+    value_z: Tensor | None,
+    value_bin: Tensor | None,
+    delta: float = VALUE_HUBER_DELTA,
+) -> Tensor:
+    """Huber loss from ``head(hidden)`` onto ``value_z``, over the numeric targets only.
+
+    ``hidden`` is ``(N, dim)``; ``value_z`` and ``value_bin`` are ``(N,)`` and
+    describe the *target* event of each row. The mask is ``value_bin != 0``,
+    which is the cache's own encoding of "this event carries no number": ``0.0``
+    is stored in ``value_z`` for value-less events and is also a perfectly
+    ordinary z-score, so regressing on the unmasked tensor would train the head
+    to emit the mean of a distribution half of which is a placeholder.
+
+    Returns a zero scalar -- not NaN -- when nothing is scored, so the term can be
+    added to the total unconditionally on a batch that happens to carry no
+    numeric target.
+    """
+    if head is None or value_z is None or value_bin is None or hidden.shape[0] == 0:
+        return hidden.new_zeros(())
+    mask = value_bin != 0
+    if not bool(mask.any()):
+        return hidden.new_zeros(())
+    predicted = head(hidden[mask]).squeeze(-1).float()
+    return F.huber_loss(predicted, value_z[mask].float(), delta=delta, reduction="mean")
 
 
 def jepa_loss(predictions: Tensor, targets: Tensor, beta: float = 1.0) -> Tensor:
@@ -118,6 +167,11 @@ class ObjectiveConfig:
     lambda_recon: float = 0.0
     #: Add an 11-way ``value_bin`` head alongside it, at the same weight.
     recon_value: bool = False
+    #: Weight on the continuous ``value_z`` Huber regression. ``0.0`` builds no
+    #: head at all, so a run that leaves it alone is byte-identical. Independent
+    #: of ``lambda_recon``/``recon_value``: this predicts the number, those
+    #: predict the code and the decile.
+    lambda_value: float = 0.0
 
     #: ``nextlatent``: the step offsets predicted, one MLP head each. ``[1]`` is
     #: "the next event"; ``[1, 4, 16]`` adds two coarser look-aheads whose losses
@@ -161,10 +215,11 @@ class JEPAObjective(nn.Module):
         config: ObjectiveConfig | None = None,
         recon_head: nn.Module | None = None,
         recon_value_head: nn.Module | None = None,
+        value_head: nn.Module | None = None,
     ) -> None:
         super().__init__()
         self.config = config or ObjectiveConfig()
-        self._heads = [recon_head, recon_value_head]
+        self._heads = [recon_head, recon_value_head, value_head]
         self.sigreg = SIGReg(
             n_directions=self.config.sigreg_directions,
             max_rows=self.config.sigreg_max_rows,
@@ -206,7 +261,7 @@ class JEPAObjective(nn.Module):
         total = pred_term + cfg.lambda_sigreg * (sig_tokens + sig_cls)
         if cfg.lambda_recon != 0.0:
             total = total + cfg.lambda_recon * (recon + recon_value)
-        return {
+        losses = {
             "loss": total,
             "pred_loss": pred_loss.detach(),
             "sigreg_tokens": sig_tokens.detach(),
@@ -214,6 +269,16 @@ class JEPAObjective(nn.Module):
             "recon_loss": recon.detach(),
             "recon_value_loss": recon_value.detach(),
         }
+        if cfg.lambda_value != 0.0:
+            value = value_regression_loss(
+                self._heads[2],
+                output.predictions,
+                output.extras.get("value_target_z"),
+                output.extras.get("value_target_bin"),
+            )
+            losses["loss"] = losses["loss"] + cfg.lambda_value * value
+            losses["value_loss"] = value.detach()
+        return losses
 
     def reconstruction(self, output: JEPAOutput) -> tuple[Tensor, Tensor]:
         """``(code CE, value_bin CE)`` from the predicted latents, or two zeros.
@@ -223,7 +288,7 @@ class JEPAObjective(nn.Module):
         and its gradient do not belong on a 16 GB laptop.
         """
         zero = output.predictions.new_zeros(())
-        head, value_head = self._heads
+        head, value_head = self._heads[0], self._heads[1]
         if self.config.lambda_recon == 0.0 or output.predictions.shape[0] == 0:
             return zero, zero
         recon, recon_value = zero, zero

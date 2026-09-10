@@ -33,6 +33,15 @@ contribute.
     dozen present ones. That is the standard formulation and the one
     ``lambda_recon: 0.1`` was chosen against; a ``pos_weight`` would be a
     different experiment.
+
+**The continuous term is the same for both.** ``lambda_value`` adds a Huber
+regression from the predicted latent onto the target event's ``value_z``
+(:func:`ehrjepa.objectives.loss.value_regression_loss`), masked to the targets
+that carry a number. It is orthogonal to ``lambda_recon``: on ICU state the code
+identity is nearly uninformative -- 43 codes, of which one channel is 12% of all
+events -- and the *number* is the record, so "predict the code" and "predict the
+number" are different auxiliaries and get different weights and different log
+columns.
 """
 
 from __future__ import annotations
@@ -45,7 +54,7 @@ from torch.utils.checkpoint import checkpoint
 from ehrjepa.data.tokenize import PAD_ID
 from ehrjepa.models.jepa import JEPAOutput
 from ehrjepa.objectives.ar import ar_loss_chunked
-from ehrjepa.objectives.loss import ObjectiveConfig, jepa_loss
+from ehrjepa.objectives.loss import ObjectiveConfig, jepa_loss, value_regression_loss
 from ehrjepa.objectives.sigreg import SIGReg
 
 __all__ = ["BCE_CHUNK", "LatentObjective", "multilabel_bce_chunked"]
@@ -98,10 +107,15 @@ class LatentObjective(nn.Module):
     in the optimizer's weight-decay bookkeeping.
     """
 
-    def __init__(self, config: ObjectiveConfig, recon_head: nn.Module | None = None) -> None:
+    def __init__(
+        self,
+        config: ObjectiveConfig,
+        recon_head: nn.Module | None = None,
+        value_head: nn.Module | None = None,
+    ) -> None:
         super().__init__()
         self.config = config
-        self._heads = [recon_head]
+        self._heads = [recon_head, value_head]
         self.sigreg = SIGReg(
             n_directions=config.sigreg_directions,
             max_rows=config.sigreg_max_rows,
@@ -177,6 +191,15 @@ class LatentObjective(nn.Module):
         total = pred_term + cfg.lambda_sigreg * (sig_tokens + sig_cls)
         if cfg.lambda_recon != 0.0:
             total = total + cfg.lambda_recon * recon
+        if cfg.lambda_value != 0.0:
+            value = value_regression_loss(
+                self._heads[1],
+                output.predictions,
+                output.extras.get("value_target_z"),
+                output.extras.get("value_target_bin"),
+            )
+            total = total + cfg.lambda_value * value
+            extra = {**extra, "value_loss": value.detach()}
         losses = {
             "loss": total,
             "pred_loss": pred_loss.detach(),

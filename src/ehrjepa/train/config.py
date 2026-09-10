@@ -165,6 +165,19 @@ class PretrainConfig:
         values["time_feature_dropout"] = self.train.time_feature_dropout
         values["recon_head"] = self.objective.lambda_recon != 0.0
         values["recon_value_head"] = values["recon_head"] and self.objective.recon_value
+        values["value_head"] = self.objective.lambda_value != 0.0
+        # ``model.encoder: lm`` serialises events to text, so the cache whose
+        # ``vocab.parquet`` and ``quantizer.parquet`` supply the words and the
+        # per-code scale is the one the run trains on. There is exactly one
+        # sensible value and an explicit ``model.lm_cache_dir`` still wins.
+        if values.get("encoder") == "lm":
+            values.setdefault("lm_cache_dir", str(self.data.cache_dir))
+            if self.objective.kind == "jepa":
+                raise ValueError(
+                    "model.encoder: lm cannot run objective.kind: jepa -- masked-span "
+                    "JEPA drops context positions with a key-side attention mask, and a "
+                    "serialised text window has none. Use ar or nextlatent."
+                )
         # The causal latent objectives replace the transformer predictor with
         # their own MLP heads, and carry the horizon lists the heads are shaped
         # from -- into the *model* config, so a checkpoint rebuilds them without

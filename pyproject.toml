@@ -53,6 +53,13 @@ codetext = [
   "sentence-transformers>=3.0",
   "icd9cms>=0.2",
 ]
+# `model.encoder: lm` (ehrjepa.models.lm): a frozen pretrained causal LM as the
+# event encoder, with LoRA adapters on its attention projections. Only that one
+# config value needs these; every other objective and encoder is torch-only.
+lm = [
+  "transformers>=4.44",
+  "peft>=0.11",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",

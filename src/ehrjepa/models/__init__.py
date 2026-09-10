@@ -17,7 +17,14 @@ named configurations (tiny/small/base) for scaling studies.
 from ehrjepa.models.ar import EHRAR, AROutput
 from ehrjepa.models.embedding import EventEmbedding
 from ehrjepa.models.encoder import Encoder, EncoderOutput
-from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig, JEPAOutput, ema_momentum
+from ehrjepa.models.jepa import (
+    EHRJEPA,
+    EHRJEPAConfig,
+    JEPAOutput,
+    build_event_stack,
+    effective_valid,
+    ema_momentum,
+)
 from ehrjepa.models.latent import (
     LATENT_MODELS,
     EHRNextLatent,
@@ -50,5 +57,7 @@ __all__ = [
     "RotaryEmbedding",
     "ScalarEncoder",
     "TransformerBlock",
+    "build_event_stack",
+    "effective_valid",
     "ema_momentum",
 ]

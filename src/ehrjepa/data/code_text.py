@@ -88,6 +88,9 @@ from ehrjepa.data.tokenize import PAD_ID, SPECIAL_TOKENS, Vocabulary, split_code
 __all__ = [
     "DEFAULT_MODEL",
     "DEFAULT_SOURCE_DIR",
+    "ICU_CHANNELS",
+    "ICU_CODES",
+    "ICU_UNITS",
     "Description",
     "DescriptionTables",
     "SOURCE_DOWNLOADS",
@@ -195,6 +198,101 @@ PREFIX_CONCEPTS: dict[str, str] = {
     "DISCHARGE": "a discharge from hospital",
     "SEX": "the patient's sex",
     "RACE": "the patient's race or ethnicity",
+}
+
+#: The ICU waveform/lab channels of the two PhysioNet sources, as the plain
+#: English a clinician would say out loud. Deliberately short and unit-free: they
+#: are read both by the sentence encoder (where a long parenthetical about units
+#: dilutes the signal) and by :mod:`ehrjepa.models.lm`, which prints them
+#: verbatim in front of the number ("heart rate 92 (+1h)"), where a unit would be
+#: repeated on every one of a window's several hundred events. The ETLs'
+#: ``DESCRIPTIONS`` tables carry the units and remain the reference for those.
+#:
+#: Keyed on the part after ``VAR//``. The two challenges name several of the same
+#: quantities differently (2019 ``SBP``/``DBP``/``Hct``/``Resp`` against 2012
+#: ``SysABP``/``DiasABP``/``HCT``/``RespRate``), so both spellings are here.
+ICU_CHANNELS: dict[str, str] = {
+    # Vitals
+    "HR": "heart rate",
+    "O2Sat": "oxygen saturation",
+    "Temp": "temperature",
+    "SBP": "systolic blood pressure",
+    "SysABP": "systolic blood pressure",
+    "NISysABP": "non-invasive systolic blood pressure",
+    "MAP": "mean arterial pressure",
+    "NIMAP": "non-invasive mean arterial pressure",
+    "DBP": "diastolic blood pressure",
+    "DiasABP": "diastolic blood pressure",
+    "NIDiasABP": "non-invasive diastolic blood pressure",
+    "Resp": "respiratory rate",
+    "RespRate": "respiratory rate",
+    "EtCO2": "end-tidal carbon dioxide",
+    "GCS": "Glasgow coma scale",
+    "MechVent": "mechanical ventilation",
+    "Urine": "urine output",
+    "Weight": "weight",
+    "Height": "height",
+    # Blood gas
+    "BaseExcess": "base excess",
+    "HCO3": "bicarbonate",
+    "FiO2": "fraction of inspired oxygen",
+    "pH": "arterial pH",
+    "PaCO2": "arterial carbon dioxide partial pressure",
+    "PaO2": "arterial oxygen partial pressure",
+    "SaO2": "arterial oxygen saturation",
+    # Chemistry
+    "AST": "aspartate transaminase",
+    "ALT": "alanine transaminase",
+    "ALP": "alkaline phosphatase",
+    "Alkalinephos": "alkaline phosphatase",
+    "BUN": "blood urea nitrogen",
+    "Calcium": "calcium",
+    "Chloride": "chloride",
+    "Creatinine": "creatinine",
+    "Bilirubin": "bilirubin",
+    "Bilirubin_direct": "direct bilirubin",
+    "Bilirubin_total": "total bilirubin",
+    "Glucose": "serum glucose",
+    "Lactate": "lactate",
+    "Magnesium": "magnesium",
+    "Mg": "magnesium",
+    "Phosphate": "phosphate",
+    "Potassium": "potassium",
+    "K": "potassium",
+    "Na": "sodium",
+    "Albumin": "albumin",
+    "Cholesterol": "cholesterol",
+    "TroponinI": "troponin I",
+    "TroponinT": "troponin T",
+    # Haematology
+    "Hct": "hematocrit",
+    "HCT": "hematocrit",
+    "Hgb": "hemoglobin",
+    "PTT": "partial thromboplastin time",
+    "WBC": "white blood cell count",
+    "Fibrinogen": "fibrinogen",
+    "Platelets": "platelet count",
+}
+
+#: ICU stay structure, outcomes and severity scores: whole codes, no
+#: ``PREFIX//value`` split, from the two PhysioNet ETLs.
+ICU_CODES: dict[str, str] = {
+    "ICU_HOUR": "hour of the ICU stay",
+    "AGE": "age in years",
+    "HOSP_ADM_TIME": "hours from hospital admission to ICU admission",
+    "SEPSIS_ONSET": "onset of sepsis",
+    "LOS": "length of hospital stay in days",
+    "SURVIVAL": "days from ICU admission to death",
+    "SAPS_I": "SAPS-I severity score",
+    "SOFA": "SOFA organ failure score",
+}
+
+#: ICU types, keyed on the part after ``UNIT//``.
+ICU_UNITS: dict[str, str] = {
+    "MICU": "medical intensive care unit",
+    "SICU": "surgical intensive care unit",
+    "CCU": "coronary care unit",
+    "CSRU": "cardiac surgery recovery unit",
 }
 
 #: HCPCS level II letter groups, for codes the code table does not carry.
@@ -504,6 +602,9 @@ def describe(code: str, tables: DescriptionTables) -> Description:
     structural = STRUCTURAL_CODES.get(code)
     if structural is not None:
         return Description(code, structural, "handwritten", "exact")
+    icu = ICU_CODES.get(code)
+    if icu is not None:
+        return Description(code, icu, "physionet-codebook", "exact")
 
     parts = split_code(code)
     if parts is None:
@@ -513,6 +614,20 @@ def describe(code: str, tables: DescriptionTables) -> Description:
         return Description(code, f"clinical event coded {code}", "fallback", "fallback")
     prefix, _, value = parts
     family = prefix.upper()
+
+    if family == "VAR":
+        # Case-sensitive: the challenge column names are the vocabulary's own
+        # spelling and are what :data:`ICU_CHANNELS` is keyed on.
+        channel = ICU_CHANNELS.get(value)
+        if channel:
+            return Description(code, channel, "physionet-codebook", "exact")
+        return Description(code, f"measurement of {value}", "fallback", "fallback")
+
+    if family == "UNIT":
+        unit = ICU_UNITS.get(value.upper())
+        if unit:
+            return Description(code, unit, "physionet-codebook", "exact")
+        return Description(code, f"admission to the {value} unit", "fallback", "fallback")
 
     if family.startswith("SP_"):
         name = SP_FLAGS.get(family)
