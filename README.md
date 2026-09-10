@@ -276,6 +276,18 @@ through the same, but untrained, architecture as its control.*
 The DE-SynPUF stage is complete (pilot, ablation, and scale grids through the
 final 1B default, full held-out split).
 
+- **Next, pre-registered and not yet run:** the same objectives on *continuous
+  ICU state*, where 99% of events carry a number and the code is nearly
+  uninformative — the regime where a latent objective should benefit if
+  predicting a representation is itself the useful part. Design, decision rule
+  and what the test cannot answer are fixed in advance in
+  [`docs/experiments/A2_PLAN.md`](docs/experiments/A2_PLAN.md),
+  [`a2-physionet2019/README.md`](docs/experiments/a2-physionet2019/README.md)
+  and [`a2-physionet2012/README.md`](docs/experiments/a2-physionet2012/README.md).
+  Two new mechanisms it needs are in the tree: a continuous value-regression
+  auxiliary (`objective.lambda_value`) and a pretrained-language-model event
+  encoder (`model.encoder: lm`, optional `lm` extra) that reads each event as
+  `heart rate 92 (+1h)` off a frozen Qwen2.5-0.5B with LoRA.
 - Stage B: pretrain and evaluate on the full MIMIC-IV v3.1 extract, where
   laboratory values exist and the value path is actually exercised.
 - Evaluate against the EHRSHOT task suite and MEDS-DEV.

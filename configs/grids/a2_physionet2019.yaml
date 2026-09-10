@@ -42,13 +42,15 @@
 #
 # Sizing the LM cell. Measured on this repository's M4 (16 GB, MPS, bf16):
 # 4 x 256-event windows through Qwen2.5-0.5B + LoRA with gradient checkpointing
-# ran at LM_TOKENS_PER_S event slots/s -- see docs/experiments/a2-physionet2019/README.md
+# ran at 14 event slots/s at a peak of 11.6 GB of MPS driver allocation -- see
+# docs/experiments/a2-physionet2019/README.md
 # for the command and the table. Scaling that to the RTX 4060 (8 GB) and holding
 # the cell to about six hours gives the budget below, which is far short of the
 # 100M the from-scratch cells get: this row answers "what does a pretrained
 # encoder add", not "does it win at matched compute", and its README says so.
-# `data.max_len: 192` keeps a window inside `model.lm_max_tokens: 2048` at the
-# measured ~9.6 tokens per event, so `lm_events_kept` should log 1.0 and no
+# `data.max_len: 160` keeps a window inside `model.lm_max_tokens: 2048` at the
+# measured 12.0 subword tokens per event, so `lm_events_kept` should log 1.0
+# and no
 # window is truncated; `run.batch_size: 2` with `optim.accum_steps: 8` is the
 # 8 GB fit (effective batch 16, an eighth of the activation memory) -- the M4
 # measurement below peaked at 11.6 GB of MPS driver allocation at batch 4 x 256
@@ -149,7 +151,7 @@ runs:
       objective.lambda_sigreg: 0.0
 
   - name: hybrid_bins_lm_s1
-    budget_tokens: 1500000
+    budget_tokens: 1000000
     overrides:
       run.seed: 1
       objective.kind: nextlatent
@@ -158,7 +160,7 @@ runs:
       model.lm_name: Qwen/Qwen2.5-0.5B
       model.lm_max_tokens: 2048
       model.target_mode: shared
-      data.max_len: 192
+      data.max_len: 160
       run.batch_size: 2
       optim.accum_steps: 8
       optim.warmup_steps: 50
@@ -216,7 +218,7 @@ runs:
       objective.lambda_sigreg: 0.0
 
   - name: hybrid_bins_lm_s2
-    budget_tokens: 1500000
+    budget_tokens: 1000000
     overrides:
       run.seed: 2
       objective.kind: nextlatent
@@ -225,7 +227,7 @@ runs:
       model.lm_name: Qwen/Qwen2.5-0.5B
       model.lm_max_tokens: 2048
       model.target_mode: shared
-      data.max_len: 192
+      data.max_len: 160
       run.batch_size: 2
       optim.accum_steps: 8
       optim.warmup_steps: 50
