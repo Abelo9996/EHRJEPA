@@ -1,6 +1,7 @@
 # The canonical MEDS layout
 
-Every source we ingest -- MIMIC-IV, CMS DE-SynPUF, Synthea -- is lowered into one
+Every source we ingest -- MIMIC-IV, CMS DE-SynPUF, Synthea, PhysioNet/CinC 2019,
+PhysioNet/CinC 2012 -- is lowered into one
 identical on-disk shape, so the tokenizer and model in phase 3 never learn that
 more than one source exists. This document is the contract.
 
@@ -92,6 +93,35 @@ step yet, and inventing one would be guesswork. What is shared is the *shape*:
 | MIMIC-IV | whatever `meds_etl.mimic` emits: `MIMIC_IV_ITEM/<itemid>`, `MIMIC_IV_LAB/<itemid>`, `ICD9CM/<code>`, `ICD10CM/<code>`, `NDC/<ndc>`, `MIMIC_IV_Admission/<type>`, ... (single slash, `MIMIC_IV_` prefixes) |
 | DE-SynPUF | `MEDS_BIRTH`, `MEDS_DEATH`, `SEX//{M,F}`, `RACE//{WHITE,BLACK,OTHER,HISPANIC}`, `SP_<FLAG>//1`, `ADMISSION//INPATIENT`, `DISCHARGE//INPATIENT` (numeric = length of stay in days), `VISIT//OUTPATIENT`, `DRG//<code>`, `ICD9CM//<code>`, `ICD9PROC//<code>`, `HCPCS//<code>`, `NDC//<code>` (numeric = days supplied) |
 | Synthea | `MEDS_BIRTH`, `MEDS_DEATH`, `SEX//<gender>`, `RACE//<race>`, `ETHNICITY//<ethnicity>`, `ENCOUNTER//<class>`, `END//ENCOUNTER`, `SNOMED//<code>`, `CONDITION_STOP//<code>`, `SNOMED_PROC//<code>`, `RXNORM//<code>` (numeric = dispenses), `LOINC//<code>//<unit>` |
+| PhysioNet/CinC 2019 | `MEDS_BIRTH`, `SEX//{M,F}`, `AGE` (numeric = years), `UNIT//{MICU,SICU}`, `HOSP_ADM_TIME` (numeric = hours, negative), `ICU_HOUR` (numeric = `ICULOS`), `VAR//<channel>` (numeric = the measurement), `SEPSIS_ONSET` |
+| PhysioNet/CinC 2012 | `MEDS_BIRTH`, `MEDS_DEATH`, `SEX//{M,F}`, `AGE` (numeric = years), `UNIT//{CCU,CSRU,MICU,SICU}`, `VAR//<channel>` (numeric = the measurement), `LOS` / `SAPS_I` / `SOFA` / `SURVIVAL` (numeric, at the outcome time) |
+
+## The two ICU sources have a synthetic clock
+
+DE-SynPUF, Synthea and MIMIC-IV all carry (shifted, but absolute) dates. The two
+PhysioNet challenge releases carry only *time since ICU admission* -- an hourly
+row index for 2019, an `HH:MM` offset for 2012 -- so both ETLs place every stay
+on the same synthetic clock with hour 0 at **`2100-01-01T00:00`**. A MEDS
+timestamp in those two extracts is therefore readable directly as "time since ICU
+admission", and the absurd year keeps it from ever passing for a real date. Both
+also emit a synthetic `MEDS_BIRTH` at `origin - Age years`, so the cache's `age`
+feature carries the reported age rather than being anchored at the first event;
+the birth *date* is fiction, the age is not.
+
+The two are asymmetric in one respect on purpose. Challenge-2019 is already on a
+one-row-per-hour grid, so it gets an `ICU_HOUR` marker per recorded hour -- that
+is the only thing that keeps an hour whose every measurement is missing visible
+in the stream, and it is the only way "hours since ICU admission" survives into
+the tensor cache. Challenge-2012 is irregularly sampled at minute resolution, so
+there is no hour grid to mark and it gets no marker.
+
+Labels live in the stream, and both ETLs are careful about where. Challenge-2019
+emits one `SEPSIS_ONSET` event at the true Sepsis-3 onset (`first SepsisLabel==1
+hour + 6h`) rather than the challenge's hourly flag, which is already shifted six
+hours early and would sit *inside* the history window of every early-prediction
+anchor. Challenge-2012 parks `MEDS_DEATH` and every outcome summary at hour 49,
+one hour past the 48-hour observation window, so an hour-48 history cannot reach
+them.
 
 Observation units are folded into the LOINC code the way MEDS_transforms does it,
 so a code's numeric values are always on one scale; unit-less observations get
@@ -221,7 +251,7 @@ No device logic lives in the dataset; tensors come out on CPU.
 ## CLI
 
 ```
-python -m ehrjepa.data.etl {mimic,desynpuf,synthea} --input <dir> --output <dir> [--shard-size N] [--work-dir D]
+python -m ehrjepa.data.etl {mimic,desynpuf,synthea,physionet2019,physionet2012} --input <dir> --output <dir> [--shard-size N] [--work-dir D]
 python -m ehrjepa.data.stats <meds_dir> [--top-k K] [--json]
 python -m ehrjepa.data.tokenize fit <meds_dir> --out <cache_dir> [--min-count 5] [--min-value-obs 20] [--ndc-digits 9] [--max-vocab N]
 python -m ehrjepa.data.tokenize build <meds_dir> --cache <cache_dir> [--min-count 5] [--ndc-digits 9] [--max-vocab N]

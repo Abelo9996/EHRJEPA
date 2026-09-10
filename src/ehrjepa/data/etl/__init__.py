@@ -28,6 +28,8 @@ SOURCES: dict[str, str] = {
     "mimic": "ehrjepa.data.etl.mimic",
     "desynpuf": "ehrjepa.data.etl.desynpuf",
     "synthea": "ehrjepa.data.etl.synthea",
+    "physionet2019": "ehrjepa.data.etl.physionet2019",
+    "physionet2012": "ehrjepa.data.etl.physionet2012",
 }
 
 
