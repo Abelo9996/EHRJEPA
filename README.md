@@ -103,27 +103,40 @@ control (0.6821). Grids 2–4 (20 trained cells total) are consolidated in
 run adds few-shot AUROC (k=32, 128, all) for `lr`, `gbm`, `ar`, and the
 hybrid.*
 
-**Current findings** (from
-[`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md),
-`ar` and the `nextlatent`+recon hybrid (`hybrid`) at 200M and 1B nominal
-token slots, 6L/256d encoder, RTX 4060, same 3,000 held-out DE-SynPUF
-subjects, 200 bootstrap resamples, and 7 tasks as the pilot grids below,
-seed 0):
+**Current findings.** The DE-SynPUF stage is complete: the final default
+(`configs/pretrain_default.yaml` — hybrid objective, causal encoder, horizons
+`[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`, EMA target) trained to
+1B nominal token slots, seeds 0/1/2, 6L/256d encoder, evaluated against `ar`
+on the FULL 11,708-subject DE-SynPUF held-out split (not the earlier
+3,000-subject subset), 200 bootstrap resamples (from
+[`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md)'s
+"Final 1B comparison" section):
 
-- `ar` mean AUROC (1B is a 3-seed mean): 0.7205 (48M tokens) → 0.7304 (200M)
-  → 0.7251 (1B) — does not improve from 200M to 1B and drops on 6 of 7 tasks
-  over that step (all but `mortality_365d`).
-- `hybrid` mean AUROC (1B is a 3-seed mean) improves at every step: 0.7287
-  (48M) → 0.7328 (200M) → 0.7363 (1B), the highest mean AUROC of any cell
-  across all three budgets (above `gbm` 0.7261 and `lr` 0.6949).
-- At 1B (3-seed means), `hybrid` leads `ar` on 6 of 7 tasks (all but
-  `mortality_365d`) by 0.81 to 2.16 AUROC points; `ar` leads on
-  `mortality_365d` by 1.31 points.
-- Per-task min-max ranges across the 3 seeds at 1B do not overlap between
-  `ar` and `hybrid` on `new_dx_365d/ckd`, `new_dx_365d/diabetes`,
-  `new_dx_365d/heart_failure` and `readmission_30d`; they overlap on
-  `inpatient_365d` and `mortality_365d`, and are within 0.0022 of overlapping
-  on `new_dx_365d/copd`.
+| task | `ar` (3-seed mean) | `hybrid_final` (3-seed mean, default) |
+|---|---|---|
+| inpatient_365d | 0.742 | 0.757 |
+| mortality_365d | 0.605 | 0.601 |
+| new_dx_365d/ckd | 0.767 | 0.783 |
+| new_dx_365d/copd | 0.760 | 0.772 |
+| new_dx_365d/diabetes | 0.763 | 0.778 |
+| new_dx_365d/heart_failure | 0.772 | 0.798 |
+| readmission_30d | 0.658 | 0.688 |
+| **mean-of-6** (excl. mortality) | **0.744** | **0.763** |
+
+Per-task seed ranges (min-max across 3 seeds) do not overlap between `ar` and
+`hybrid_final` on all six non-mortality tasks; `mortality_365d` overlaps. A
+prior variant of the hybrid with SIGReg on (`lambda_sigreg: 0.05`) scores
+0.762 mean-of-6 on the same full split — between `ar` and the final default.
+
+**Scaling** (from
+[`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md),
+3,000-subject-subset numbers at 48M/200M, historical):
+
+- `ar` mean AUROC (3,000-subject subset): 0.7205 (48M tokens) → 0.7304 (200M)
+  → 0.7251 (1B, 3,000-subject subset) — does not improve from 200M to 1B and
+  drops on 6 of 7 tasks over that step (all but `mortality_365d`).
+- `hybrid` mean AUROC (3,000-subject subset) improves at every step: 0.7287
+  (48M) → 0.7328 (200M) → 0.7363 (1B, 3,000-subject subset, SIGReg on).
 
 **Ablations** (from
 [`docs/experiments/ABLATION_RESULTS.md`](docs/experiments/ABLATION_RESULTS.md),
@@ -138,15 +151,19 @@ seed 0):
   best at both seeds; horizon-[1]-only and shared-target are the worst;
   `lambda_recon: 0.3` is within 0.0039 of the `0.1` default, inside the
   0.0020-0.0046 seed spread among these knobs.
-- New default (`configs/pretrain_default.yaml`): hybrid, causal,
-  horizons `[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`; target
-  encoder EMA or frozen AR teacher, pending `ablate4-desynpuf`.
+- Final default (`configs/pretrain_default.yaml`): hybrid, causal,
+  horizons `[1, 4, 16]`, `lambda_recon: 0.1`, `lambda_sigreg: 0`, EMA target.
 - `ablate3-desynpuf` (same protocol, 2 seeds): a frozen 1B AR checkpoint as
   target encoder gains +0.6 (mean-of-6) over the EMA default, equal to the
   no-SIGReg gain; initializing the student from that checkpoint removes the
   gain. Text-initialized code embeddings are neutral for both the hybrid and
   `ar` objectives; freezing the text table costs 0.1 while removing 58% of
   the trainable parameters (7,680,000 of 13,208,336).
+- `ablate4-desynpuf` (same protocol, 2 seeds): the no-SIGReg and frozen-teacher
+  gains do not stack (combined mean-of-6 0.7625, against 0.7615 for either
+  alone). EMA is kept as the target encoder over the frozen teacher: equal
+  accuracy, and EMA needs no separately trained checkpoint staged before a
+  run starts.
 
 **Pilot findings** (from
 [`docs/experiments/PILOT_RESULTS.md`](docs/experiments/PILOT_RESULTS.md), the
@@ -250,8 +267,11 @@ through the same, but untrained, architecture as its control.*
 
 ## Roadmap
 
-- Seeds at 1B (`scale1b-seeds-desynpuf`): pending.
-- Scale up on the full MIMIC-IV v3.1 extract.
+The DE-SynPUF stage is complete (pilot, ablation, and scale grids through the
+final 1B default, full held-out split).
+
+- Stage B: pretrain and evaluate on the full MIMIC-IV v3.1 extract, where
+  laboratory values exist and the value path is actually exercised.
 - Evaluate against the EHRSHOT task suite and MEDS-DEV.
 - Release: pretrained weights, benchmark numbers, and a citable preprint.
 

@@ -3,26 +3,94 @@
 Consolidates the two token-scaling grids run on CUDA hardware (an RTX 4060,
 8 GB VRAM) against the 48M-token pilot grids (`docs/experiments/PILOT_RESULTS.md`,
 run on Apple M4/MPS). Source directories:
-[`scale-desynpuf/`](scale-desynpuf/) (200M tokens, 6L/256d encoder) and
-[`scale1b-desynpuf/`](scale1b-desynpuf/) (1B tokens, same encoder). Each
-directory's `README.md` is the protocol written before its numbers existed;
-each `summary.md` is the row source the tables below are built from.
+[`scale-desynpuf/`](scale-desynpuf/) (200M tokens, 6L/256d encoder),
+[`scale1b-desynpuf/`](scale1b-desynpuf/) (1B tokens, same encoder), and
+[`scale1b-final-desynpuf/`](scale1b-final-desynpuf/) (the repository default
+at 1B tokens, plus every earlier 1B checkpoint re-scored on the full held-out
+split). Each directory's `README.md` is the protocol written before its
+numbers existed; each `summary.md` is the row source the tables below are
+built from.
 
-Common to every 200M/1B row: `configs/pretrain_scale.yaml` base (6-layer,
-256-wide encoder, 4-layer, 128-wide predictor, SwiGLU, dropout 0.1),
-`data/cache/desynpuf-s1` `train` split, seed 0, held-out evaluation on the
-same seeded 3,000-subject `held_out` cut with 200 bootstrap resamples across
-all seven tasks (`inpatient_365d`, `mortality_365d`,
-`new_dx_365d/{ckd,copd,diabetes,heart_failure}`, `readmission_30d`) as the
-pilot grids. The pilot rows below (48M tokens, 4-layer/192-wide encoder,
-seed 0) are `ar` and `hybrid` (`nextlatent_h1416_recon`) from
-`docs/experiments/PILOT_RESULTS.md`'s master table.
+**The headline numbers in this document are now the "Final 1B comparison on
+the full held-out split" section directly below** — the repository default
+(`hybrid_final`) against `ar`, on the full 11,708-subject held-out split.
+Every other table in this document, unless it says otherwise, is scored on
+the earlier seeded 3,000-subject held-out subset and is kept below as
+history; those numbers are superseded by the final section for any cell that
+appears in both.
+
+Common to every 200M/1B row below `## Final 1B comparison`:
+`configs/pretrain_scale.yaml` base (6-layer, 256-wide encoder, 4-layer,
+128-wide predictor, SwiGLU, dropout 0.1), `data/cache/desynpuf-s1` `train`
+split, held-out evaluation on the same seeded 3,000-subject `held_out` cut
+with 200 bootstrap resamples across all seven tasks (`inpatient_365d`,
+`mortality_365d`, `new_dx_365d/{ckd,copd,diabetes,heart_failure}`,
+`readmission_30d`) as the pilot grids. The pilot rows below (48M tokens,
+4-layer/192-wide encoder, seed 0) are `ar` and `hybrid`
+(`nextlatent_h1416_recon`) from `docs/experiments/PILOT_RESULTS.md`'s master
+table.
 
 The 1B `ar` row was re-evaluated after commit `8721a62` fixed an
 embedding-cache key collision in the eval harness (a second grid's cell
 sharing the display name `ar` had been silently reusing another grid's
 cached embeddings); see [`scale1b-desynpuf/README.md`](scale1b-desynpuf/README.md)
 for the mechanism.
+
+## Final 1B comparison on the full held-out split
+
+Source: [`scale1b-final-desynpuf/summary.md`](scale1b-final-desynpuf/summary.md);
+protocol in [`scale1b-final-desynpuf/README.md`](scale1b-final-desynpuf/README.md),
+complete. `configs/pretrain_scale.yaml` base (6L/256d encoder), 1,000,013,824
+nominal token slots per cell, seeds 0/1/2, evaluated on the FULL held-out
+split (11,708 subjects, `eval_subject_limit: null`), 200 bootstrap resamples,
+`lr`/`gbm` refit on the same split. Three cells: `ar` (next-code AR),
+`hybrid` (the earlier `nextlatent_h1416_recon` config, `lambda_sigreg: 0.05`
+— this is the same trained checkpoint as the `hybrid` row in every table
+below this one, re-scored on the full split rather than the 3,000-subject
+subset), and `hybrid_final` (the repository default,
+`configs/pretrain_default.yaml`: causal next-latent, horizons `[1, 4, 16]`,
+`lambda_recon: 0.1`, `lambda_sigreg: 0`, EMA target — see
+[`ABLATION_RESULTS.md`](ABLATION_RESULTS.md)). `std` is sample standard
+deviation ($n=3$, ddof=1). `overlap` is whether `ar`'s and `hybrid_final`'s
+min-max ranges across the three seeds intersect for that task.
+
+| task | ar mean | ar std | ar range | hybrid_final mean | hybrid_final std | hybrid_final range | overlap |
+|---|---|---|---|---|---|---|---|
+| inpatient_365d | 0.7420 | 0.0019 | [0.7399, 0.7435] | 0.7573 | 0.0019 | [0.7558, 0.7595] | no |
+| mortality_365d | 0.6053 | 0.0057 | [0.6006, 0.6116] | 0.6011 | 0.0014 | [0.5997, 0.6025] | yes |
+| new_dx_365d/ckd | 0.7674 | 0.0024 | [0.7657, 0.7701] | 0.7834 | 0.0012 | [0.7821, 0.7844] | no |
+| new_dx_365d/copd | 0.7603 | 0.0028 | [0.7581, 0.7634] | 0.7721 | 0.0003 | [0.7719, 0.7724] | no |
+| new_dx_365d/diabetes | 0.7625 | 0.0017 | [0.7606, 0.7637] | 0.7777 | 0.0015 | [0.7762, 0.7792] | no |
+| new_dx_365d/heart_failure | 0.7715 | 0.0025 | [0.7691, 0.7741] | 0.7982 | 0.0014 | [0.7970, 0.7997] | no |
+| readmission_30d | 0.6580 | 0.0123 | [0.6438, 0.6655] | 0.6881 | 0.0064 | [0.6827, 0.6951] | no |
+| **mean-of-6** (excl. mortality) | **0.7436** | — | — | **0.7628** | — | — | non-overlapping on all 6 |
+
+Non-mortality seed ranges do not overlap between `ar` and `hybrid_final` on
+all six tasks; `mortality_365d` overlaps.
+
+`hybrid` (SIGReg on, `lambda_sigreg: 0.05`, the earlier configuration, same
+checkpoints as the `hybrid` rows below) scores mean-of-6 0.7615 on this same
+full split, 3-seed mean — between `ar` (0.7436) and `hybrid_final` (0.7628),
+consistent with `ABLATION_RESULTS.md`'s Grid 2/4 finding that dropping
+SIGReg is worth about +0.6 on its own.
+
+| model | inpatient_365d | mortality_365d | ckd | copd | diabetes | heart_failure | readmission_30d | mean-of-6 |
+|---|---|---|---|---|---|---|---|---|
+| `gbm` | 0.7455 | 0.5564 | 0.7713 | 0.7677 | 0.7709 | 0.7840 | 0.6670 | 0.7511 |
+| `lr` | 0.7124 | 0.5659 | 0.7390 | 0.7326 | 0.7368 | 0.7407 | 0.6529 | 0.7191 |
+| `ar` (3-seed mean) | 0.7420 | 0.6053 | 0.7674 | 0.7603 | 0.7625 | 0.7715 | 0.6580 | 0.7436 |
+| `hybrid`, SIGReg on (3-seed mean) | 0.7559 | 0.5991 | 0.7845 | 0.7725 | 0.7780 | 0.7944 | 0.6838 | 0.7615 |
+| `hybrid_final`, default (3-seed mean) | 0.7573 | 0.6011 | 0.7834 | 0.7721 | 0.7777 | 0.7982 | 0.6881 | **0.7628** |
+
+`hybrid_final` is above `gbm` (0.7511) and `lr` (0.7191) on the mean-of-6, and
+above `ar` on every non-mortality task with non-overlapping seed ranges.
+
+## Historical: 3,000-subject-subset results
+
+Every table from here down is on the earlier seeded 3,000-subject held-out
+subset, not the full split above; kept for the record of what was measured
+at each stage. Where a cell also appears in the full-split table above, that
+table supersedes the numbers here.
 
 ## All trained cells
 
@@ -60,29 +128,48 @@ below.
 
 ## Scaling: ar vs. hybrid, 48M → 200M → 1B
 
-The 1B row below is the 3-seed mean (seeds 0, 1, 2); see the seed-replication
-table further down for per-seed values, per-task std, and overlap.
+The 48M and 200M rows are seed 0 on the 3,000-subject subset, unchanged from
+before. **The 1B row is now the full-held-out-split, 3-seed mean from the
+"Final 1B comparison" section above** (`ar` and `hybrid_final`, not the
+3,000-subject-subset numbers reported for 1B previously); see that section
+for per-seed values, per-task std, and overlap, and the seed-replication
+table further down for the superseded 3,000-subject-subset 1B numbers.
 
-| tokens | ar mean AUROC | ar readmission_30d | hybrid mean AUROC | hybrid readmission_30d |
-|---|---|---|---|---|
-| 48M | 0.7205 | 0.6946 | 0.7287 | 0.6985 |
-| 200M | 0.7304 | 0.6674 | 0.7328 | 0.6930 |
-| 1B (3-seed mean) | 0.7251 | 0.6637 | **0.7363** | **0.6853** |
+| tokens | split | ar mean AUROC | ar readmission_30d | hybrid mean AUROC | hybrid readmission_30d |
+|---|---|---|---|---|---|
+| 48M | 3,000-subject subset | 0.7205 | 0.6946 | 0.7287 | 0.6985 |
+| 200M | 3,000-subject subset | 0.7304 | 0.6674 | 0.7328 | 0.6930 |
+| 1B (3-seed mean) | full split (11,708 subjects) | 0.7436 | 0.6580 | **0.7628** | **0.6881** |
+
+(`hybrid` in the 1B row is `hybrid_final`, the repository default; mean AUROC
+here is mean-of-6, excluding `mortality_365d`, to match the full-split table
+above — the 48M/200M rows above are mean-of-7, so the two are not directly
+comparable across rows; see the "Final 1B comparison" section for the
+full-split mean-of-6 vs. mean-of-7 distinction.)
 
 ## Figure
 
-![Left: mean AUROC vs. token budget (log x) for ar, hybrid, recon_only, jepa_ema, with gbm as a horizontal reference. Right: per-task AUROC at 1B tokens, ar vs. hybrid, paired bars.](../figures/scale_desynpuf.png)
+![Left: mean AUROC vs. token budget (log x) for ar, hybrid, recon_only, jepa_ema on the 3,000-subject subset (circles), with gbm as a horizontal reference and full-split 1B points for ar_full/hybrid_final overlaid as diamonds. Right: per-task AUROC at 1B tokens on the full held-out split, ar vs. hybrid_final, paired bars.](../figures/scale_desynpuf.png)
 
 Produced by [`scripts/plot_scale.py`](../../scripts/plot_scale.py), which
-parses the five committed `summary.md` files directly (the three pilot grids
-that contributed a 48M-token point, plus both scale grids) — nothing plotted
-is a number not already committed in one of those tables. Regenerate with:
+parses the seven committed `summary.md` files directly (the three pilot grids
+that contributed a 48M-token point, both scale grids, and
+`scale1b-final-desynpuf`) — nothing plotted is a number not already committed
+in one of those tables. The left panel's circles (48M, 200M, and the earlier
+1B point) are the 3,000-subject subset; its diamonds, and the entire right
+panel, are the full held-out split (11,708 subjects) — the two splits are
+never drawn as the same marker shape so they cannot be misread as
+comparable. Regenerate with:
 
 ```bash
 python scripts/plot_scale.py
 ```
 
-## 1B seed replication
+## 1B seed replication (3,000-subject subset, historical)
+
+Superseded by the full-held-out-split "Final 1B comparison" section above
+for `ar` and `hybrid_final`; kept here for the record of the 3,000-subject-subset
+1B numbers this document reported before the full-split re-score.
 
 `scale1b-seeds-desynpuf` (seeds 1 and 2, `ar` and `hybrid`) plus the seed-0
 rows from `scale1b-desynpuf` give three seeds per cell at 1B tokens. Std is
@@ -105,7 +192,14 @@ diabetes, heart_failure, readmission_30d); `mortality_365d` and
 definition above, with the smallest gap of any non-overlapping task (ar max
 0.7738 vs. hybrid min 0.7760, a gap of 0.0022).
 
-## Findings
+## Findings (3,000-subject subset, historical)
+
+The token-budget trend below was measured on the 3,000-subject subset at
+every budget, including the 1B point; it is retained for the record of what
+this document reported before the full-split 1B re-score. The "Final 1B
+comparison" section above is the current full-split 1B result and is not a
+drop-in replacement for every number below, since 48M and 200M have no
+full-split counterpart.
 
 - `ar` mean AUROC (3-seed mean at 1B): 0.7205 (48M) → 0.7304 (200M) → 0.7251
   (1B). It does not improve from 200M to 1B (-0.0053) and drops on six of
@@ -135,6 +229,14 @@ definition above, with the smallest gap of any non-overlapping task (ar max
 
 ## Caveats
 
+- **The "Final 1B comparison" section's `ar`/`hybrid_final`/`hybrid` numbers
+  are on the full held-out split (11,708 subjects); every other table in
+  this document, including "All trained cells", "Scaling"'s 48M/200M rows,
+  and "1B seed replication", is on the 3,000-subject subset.** They are not
+  interchangeable, though for the one cell scored on both (`hybrid`, SIGReg
+  on) the mean-of-7 difference between splits is small: 0.7356 (3,000-subject
+  subset, 3-seed mean) vs. 0.7383 (full split, 3-seed mean, computed the same
+  way including `mortality_365d`).
 - **DE-SynPUF has no labs.** It is a CMS claims-derived public-use file with
   no lab results, vitals, or notes — the same caveat as the pilot grids.
 - **3,000-subject held-out subset**, not the full `held_out` split — same

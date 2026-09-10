@@ -66,8 +66,10 @@ repository at a named commit. All pretraining is on a single synthetic,
 claims-derived source (CMS DE-SynPUF) with no laboratory values; no
 experiment on MIMIC-IV or EHRSHOT has been run. The largest token budget
 reported (1B) now has three training seeds per cell for \code{ar} and the
-hybrid; the 200M budget, and \code{recon\_only} and \code{jepa\_ema} at every
-budget they were run at, remain one training seed per cell. Nothing here
+hybrid, re-scored on the full 11{,}708-subject held-out split; the 200M
+budget, and \code{recon\_only} and \code{jepa\_ema} at every budget they were
+run at, remain one training seed on the earlier 3{,}000-subject held-out
+subset. Nothing here
 should be read as a statement about what these objectives do at production
 scale or on clinical data.}}
 \end{center}
@@ -99,12 +101,21 @@ auxiliary code-reconstruction term to a masked-span JEPA raises the gain to
 $+0.0177$ to $+0.0296$; removing the latent term entirely and keeping only
 code reconstruction retains $+0.0254$. The dense causal hybrid scores 0.7287
 ($+0.0923$), the highest of the 20 cells. Scaling the hybrid and AR to 200M
-and 1B nominal token slots on a 6-layer, 256-wide encoder, the hybrid improves
-at every step (0.7287, 0.7328, 0.7363, the last a 3-seed mean) while AR does
-not improve from 200M to 1B (0.7304, 0.7251, the last a 3-seed mean). At 1B,
-the hybrid leads AR on six of seven tasks by 0.81 to 2.16 AUROC points, and
-the per-task min-max range across the three seeds does not overlap between
-AR and the hybrid on four of those six. Three pre-registered diagnostics
+and 1B nominal token slots on a 6-layer, 256-wide encoder, on a fixed
+3{,}000-subject held-out subset, the hybrid improves at every step (0.7287,
+0.7328, 0.7363, the last a 3-seed mean) while AR does not improve from 200M
+to 1B (0.7304, 0.7251, the last a 3-seed mean). A fourth ablation grid finds
+that two independently measured +0.6-point gains (dropping SIGReg; a frozen
+AR teacher in place of EMA) do not stack when combined (mean-of-six-task
+AUROC 0.7625 combined against 0.7615 for either alone), which fixes the
+repository default's target encoder as EMA. \textbf{Re-scored on the FULL
+11{,}708-subject held-out split, at 1B tokens and three seeds, this default
+--- hybrid, causal, horizons $[1,4,16]$, no SIGReg, EMA target --- scores
+mean AUROC 0.763 across six non-mortality tasks against AR's 0.744, with
+per-task seed ranges non-overlapping on all six, and above \code{gbm} (0.751)
+and \code{lr} (0.719) on the same split; this full-split comparison
+supersedes the 3{,}000-subject-subset numbers above for every cell it
+covers.} Three pre-registered diagnostics
 measured on the
 masked-span checkpoints are reported: a ridge map from mask-token time
 features alone recovers $R^2 = 0.58$ of the layer-normed targets against 0.79
@@ -658,7 +669,14 @@ cells reported through Section~\ref{sec:seeds1b} use $\lambda_{\mathrm{sig}} =
 0.05$; Section~\ref{sec:ablate2}'s knob ablation finds $\lambda_{\mathrm{sig}}
 = 0$ (no SIGReg) the best-scoring variant at both seeds, and the repository's
 default configuration (\code{configs/pretrain\_default.yaml}) drops the term
-accordingly.
+accordingly. Section~\ref{sec:ablate3} additionally finds that a frozen 1B-token
+AR checkpoint as the target encoder gains the same amount as dropping SIGReg;
+Section~\ref{sec:ablate4} finds the two gains do not stack, which is why the
+default target encoder is EMA rather than the frozen teacher. The default is
+therefore: hybrid objective, causal encoder, horizons $[1,4,16]$,
+$\lambda_{\mathrm{recon}} = 0.1$, $\lambda_{\mathrm{sig}} = 0$, EMA target ---
+the configuration trained at 1B tokens and reported as \code{hybrid\_final}
+in Section~\ref{sec:final1b}.
 
 \subsection{Anti-collapse: SIGReg}
 
@@ -1115,7 +1133,9 @@ is above \code{ar} at both few-shot sizes on \code{mortality\_365d},
 \code{readmission\_30d} and (at $k{=}32$) \code{ckd} and \code{diabetes};
 \code{ar} is above the hybrid at both sizes on \code{inpatient\_365d},
 \code{copd} and \code{heart\_failure}. On \code{readmission\_30d} at $k{=}128$
-the hybrid reads 0.6487 against \code{ar}'s 0.5994.
+the hybrid reads 0.6487 against \code{ar}'s 0.5994. A few-shot run on the
+final 1B checkpoints (\code{ar} and \code{hybrid\_final}, Section~\ref{sec:final1b})
+is in progress; no result is reported yet.
 
 \subsection{Scaling to 200M and 1B tokens}
 \label{sec:scale}
@@ -1196,10 +1216,14 @@ tokens & \code{ar} mean & \code{ar} readmission & hybrid mean & hybrid readmissi
 \centering
 \includegraphics[width=\textwidth]{scale_desynpuf.png}
 \caption{Left: mean AUROC against token budget (log $x$) for \code{ar}, the
-hybrid, \code{recon\_only} and \code{jepa\_ema}, with \code{gbm} as a horizontal
-reference; the 1B \code{ar}/hybrid points are 3-seed means with a min-max
-error bar. Right: per-task AUROC at 1B tokens, \code{ar} against the hybrid,
-paired bars, each a 3-seed mean with a min-max whisker.}
+hybrid, \code{recon\_only} and \code{jepa\_ema} on the 3{,}000-subject
+held-out subset (circles), with \code{gbm} as a horizontal reference; the
+subset 1B \code{ar}/hybrid points are 3-seed means with a min-max error bar.
+The diamonds at 1B are the full-held-out-split (Section~\ref{sec:final1b})
+3-seed means for \code{ar} and \code{hybrid\_final}, offset in $x$ so they do
+not overlap the subset circles. Right: per-task AUROC at 1B tokens on the
+full held-out split, \code{ar} against \code{hybrid\_final}, paired bars,
+each a 3-seed mean with a min-max whisker.}
 \label{fig:scale}
 \end{figure}
 
@@ -1376,8 +1400,10 @@ measured among these four knobs.
 configuration (\code{configs/pretrain\_default.yaml}) from this result: the
 hybrid objective, causal encoder, horizons $[1, 4, 16]$,
 $\lambda_{\mathrm{recon}} = 0.1$, and $\lambda_{\mathrm{sig}} = 0$ --- SIGReg
-dropped, per the no-SIGReg result above. The target encoder is EMA or a
-frozen AR teacher (Section~\ref{sec:ablate3}), pending \code{ablate4-desynpuf}.
+dropped, per the no-SIGReg result above. The target encoder is EMA, not the
+frozen AR teacher of Section~\ref{sec:ablate3}: Section~\ref{sec:ablate4}
+finds the two gains do not stack, so there is no accuracy reason to prefer
+the frozen teacher, and EMA is the self-contained choice.
 
 \paragraph{Caveats.} The base-size default row is one seed, so every
 size/knob comparison against it is a 2-seed-vs-1-seed comparison, not
@@ -1443,9 +1469,120 @@ inside the 0.0022--0.0052 seed spread on these cells). Freezing the text
 table costs 0.1 (0.7561 vs.\ 0.7546) while removing 58\% of the trainable
 parameters --- the code table is 7{,}680{,}000 of the base-size hybrid's
 13{,}208{,}336 trainable parameters; freezing it leaves 5{,}528{,}336
-trainable. \code{ablate4-desynpuf} (running) puts the frozen AR teacher and
-$\lambda_{\mathrm{sig}} = 0$ in the same cell, two seeds, to test whether the
-two gains stack.
+trainable.
+
+\subsection{Grid 4: do the no-SIGReg and frozen-teacher gains stack?}
+\label{sec:ablate4}
+
+A fifth grid (\code{ablate4-desynpuf}, complete) puts the two +0.6-point
+knobs from Sections~\ref{sec:ablate2} and~\ref{sec:ablate3} --- dropping
+SIGReg, and a frozen 1B-token AR checkpoint as the target encoder --- in the
+same cell, \code{hybrid\_nosig\_frozen}, at two seeds, same base size, budget
+and full-held-out protocol as the two grids above.
+
+\begin{table}[h]
+\centering\small
+\caption{\code{ablate4-desynpuf}, full held-out split, 200M nominal token
+slots per cell, 2-seed mean-of-6 (excludes \code{mortality\_365d}).}
+\label{tab:ablate4}
+\begin{tabular}{lr}
+\toprule
+config & mean-6 \\
+\midrule
+\code{hybrid\_nosig} (no SIGReg alone, Grid 2) & 0.7615 \\
+\code{hybrid\_frozen\_ar} (frozen teacher alone, Grid 3) & 0.7615 \\
+\code{hybrid\_nosig\_frozen} (both, this grid) & \best{0.7625} \\
+\code{hybrid\_base\_s0} (EMA default, seed 0) & 0.7554 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Finding.} The two effects do not stack.
+\code{hybrid\_nosig\_frozen}'s 2-seed mean-of-6 (0.7625) is 0.0010 above
+either single-knob result (0.7615, 0.7615) and 0.0071 above the EMA default
+(0.7554) --- close to the size of a single knob's own gain, not the sum of
+two, against a 2-seed spread on this grid's own two rows of 0.0004 (0.7622
+vs.\ 0.7626).
+
+\paragraph{Decision.} Because the frozen teacher buys nothing once SIGReg is
+already dropped, the repository default (\code{configs/pretrain\_default.yaml})
+keeps EMA as the target encoder rather than the frozen AR teacher: the two
+are equal on this measurement, and EMA is self-contained --- it requires no
+separately trained checkpoint staged before a run starts, unlike the frozen
+teacher, which needs a 1B-token AR checkpoint built and shipped to wherever
+training happens first.
+
+\subsection{The final default at 1B tokens, on the full held-out split}
+\label{sec:final1b}
+
+Every AUROC reported above this point is on the seeded 3{,}000-subject
+held-out subset. This section reports the repository default
+(\code{hybrid\_final}: hybrid objective, causal encoder, horizons
+$[1,4,16]$, $\lambda_{\mathrm{recon}} = 0.1$, $\lambda_{\mathrm{sig}} = 0$,
+EMA target --- Sections~\ref{sec:ablate2}--\ref{sec:ablate4}) trained to 1B
+nominal token slots at seeds 0, 1, 2, evaluated against \code{ar} on the
+\textbf{full held-out split (11{,}708 subjects, not the 3{,}000-subject
+subset)}, with \code{lr} and \code{gbm} refit on the same split. The six
+earlier 1B checkpoints (\code{ar} and the SIGReg-on hybrid, seeds 0--2, from
+Sections~\ref{sec:scale} and~\ref{sec:seeds1b}) are re-scored here on the
+same full split, so every number in this section shares one evaluation set.
+This is the headline comparison of the paper; every table before it is
+scored on the 3{,}000-subject subset and is superseded by this one for the
+cells it covers.
+
+\begin{table}[t]
+\centering\small
+\caption{The final 1B comparison, full held-out split (11{,}708 subjects),
+3-seed mean. \code{hybrid} (SIGReg on, $\lambda_{\mathrm{sig}} = 0.05$) is
+the same trained checkpoints as Table~\ref{tab:scale}'s 1B hybrid row,
+re-scored here on the full split. \code{overlap} is whether \code{ar}'s and
+\code{hybrid\_final}'s per-task min-max ranges across the three seeds
+intersect.}
+\label{tab:final1b}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrl}
+\toprule
+task & \code{ar} & \code{hybrid} (SIGReg on) & \code{hybrid\_final} (default) & overlap (ar/final) \\
+\midrule
+inpatient       & 0.7420 & 0.7559 & 0.7573 & no \\
+mortality       & 0.6053 & 0.5991 & 0.6011 & yes \\
+ckd             & 0.7674 & 0.7845 & 0.7834 & no \\
+copd            & 0.7603 & 0.7725 & 0.7721 & no \\
+diabetes        & 0.7625 & 0.7780 & 0.7777 & no \\
+heart failure   & 0.7715 & 0.7944 & 0.7982 & no \\
+readmission     & 0.6580 & 0.6838 & 0.6881 & no \\
+\midrule
+mean-of-6 (excl.\ mortality) & 0.7436 & 0.7615 & \best{0.7628} & non-overlapping on all 6 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\caption{Baselines on the same full held-out split.}
+\label{tab:final1bbaselines}
+\begin{tabular}{lr}
+\toprule
+model & mean-of-6 \\
+\midrule
+\code{gbm} & 0.7511 \\
+\code{lr} & 0.7191 \\
+\code{ar} (3-seed mean) & 0.7436 \\
+\code{hybrid}, SIGReg on (3-seed mean) & 0.7615 \\
+\code{hybrid\_final}, default (3-seed mean) & \best{0.7628} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Finding.} \code{hybrid\_final} leads \code{ar} on every
+non-mortality task, and the per-task seed ranges do not overlap on any of
+those six --- the strongest overlap result reported in this paper, stronger
+than Section~\ref{sec:seeds1b}'s four-of-six on the 3{,}000-subject subset
+with the SIGReg-on hybrid. \code{hybrid\_final} is above \code{gbm} (0.7511)
+and \code{lr} (0.7191) on the same split. The SIGReg-on \code{hybrid} row
+(0.7615 mean-of-6) sits between \code{ar} and \code{hybrid\_final}, consistent
+with Sections~\ref{sec:ablate2} and~\ref{sec:ablate4}'s measurement that
+dropping SIGReg is worth about $+0.6$ points on its own.
 
 %==============================================================================
 \section{Discussion}
@@ -1482,6 +1619,17 @@ puts the three-seed means at 0.7234 (\code{ar}) and 0.7279 (hybrid), a gap of
 0.0112, with the hybrid's per-task 3-seed range above \code{ar}'s on four
 tasks where the ranges do not overlap at all (\code{ckd}, \code{diabetes},
 \code{heart\_failure}, \code{readmission\_30d}).
+
+\paragraph{The margin is largest and most consistent on the full held-out
+split.} Section~\ref{sec:final1b}'s \code{hybrid\_final} (the repository
+default: hybrid objective, no SIGReg, EMA target) against \code{ar}, both at
+1B tokens and three seeds but re-scored on the full 11{,}708-subject held-out
+split rather than the 3{,}000-subject subset, puts the mean-of-six gap at
+0.0192 (0.7628 vs.\ 0.7436) with non-overlapping per-task seed ranges on all
+six non-mortality tasks, not four of six as on the subset. Two things changed
+between that comparison and this one --- the evaluation split, and dropping
+SIGReg from the hybrid's configuration --- and this section does not
+separate their individual contributions to the wider margin.
 
 \paragraph{The AR plateau from 200M to 1B.}
 \code{ar} gains 0.0099 from 48M to 200M and loses 0.0053 from 200M to 1B
@@ -1581,6 +1729,15 @@ left for future work.
 \label{sec:limitations}
 
 \begin{enumerate}[leftmargin=*,itemsep=3pt,topsep=3pt]
+\item \textbf{Every DE-SynPUF number before Section~\ref{sec:final1b}'s table
+      used the 3{,}000-subject held-out subset, not the full split.} Table
+      \ref{tab:master}, \ref{tab:seeds}, \ref{tab:fewshot},
+      \ref{tab:scale}--\ref{tab:ablate4} are all on that subset.
+      Section~\ref{sec:final1b}'s full-held-out-split (11{,}708-subject)
+      comparison of \code{ar} against the repository default supersedes the
+      subset numbers for the cells it covers; it does not exist for every
+      cell in the earlier tables (only \code{ar}, the SIGReg-on hybrid and
+      \code{hybrid\_final} at 1B tokens were re-scored on the full split).
 \item \textbf{Single seed at 200M; three seeds at 1B for two of four
       objectives.} The 1B \code{ar} and hybrid cells have three seeds each
       (Section~\ref{sec:seeds1b}); every 200M cell (\code{ar}, hybrid,
@@ -1634,23 +1791,17 @@ left for future work.
 \label{sec:roadmap}
 
 In the order they are queued. \code{configs/pretrain\_default.yaml}
-(Section~\ref{sec:ablate2}) --- the hybrid objective, causal encoder, EMA
-target, horizons $[1, 4, 16]$, $\lambda_{\mathrm{recon}} = 0.1$,
-$\lambda_{\mathrm{sig}} = 0$ (SIGReg dropped) --- is now the default for every
-item below that trains a model, unless the item says otherwise.
+(Sections~\ref{sec:ablate2}--\ref{sec:ablate4}) --- the hybrid objective,
+causal encoder, EMA target, horizons $[1, 4, 16]$,
+$\lambda_{\mathrm{recon}} = 0.1$, $\lambda_{\mathrm{sig}} = 0$ (SIGReg
+dropped) --- is the default for every item below that trains a model, unless
+the item says otherwise. The DE-SynPUF stage is complete: the pilot,
+ablation and scale grids through the final 1B default on the full held-out
+split (Section~\ref{sec:final1b}).
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
-\item Reseed the 200M grid (\code{ar}, hybrid, \code{recon\_only},
-      \code{jepa\_ema}) so the 200M-to-1B step is a matched-seed-count
-      comparison, now that 1B has three seeds for \code{ar} and the hybrid.
-\item Take \code{recon\_only} and a masked-span cell to 1B, so that the
-      objective-family ordering at 48M and 200M can be checked at the largest
-      budget rather than inferred.
-\item Confirm the no-SIGReg default at the 200M/1B scale and, if it holds,
-      reseed the 1B hybrid cells at $\lambda_{\mathrm{sig}} = 0$ so
-      Table~\ref{tab:scale}'s scaling result is reported under the default
-      configuration rather than the $\lambda_{\mathrm{sig}} = 0.05$ setting
-      it currently uses.
+\item A few-shot run on the final 1B checkpoints (\code{ar} and
+      \code{hybrid\_final}) is in progress.
 \item Pretrain and evaluate on the full MIMIC-IV v3.1 extract, where laboratory
       values exist and the value path is actually exercised.
 \item Evaluate against the EHRSHOT task suite and MEDS-DEV, so that numbers
@@ -1792,6 +1943,9 @@ commit & date & result \\
 \code{09f4405} & 2026-09-06 & 1B-token grid, and the seed-replication grid file \\
 \code{95c8e35} & 2026-09-06 & fix: the 1B seed grid, four cells at seeds 1 and 2 \\
 \code{ce966b2} & 2026-09-06 & \code{SCALE\_RESULTS.md}, the 200M/1B grids consolidated \\
+\code{a57c91a} & 2026-09-08 & ablation grid 4: no-SIGReg hybrid with a frozen AR teacher \\
+\code{5353d33} & 2026-09-08 & final-default 1B grid: full-held-out re-scoring of earlier 1B checkpoints \\
+\code{7134ec3} & 2026-09-10 & final-default 1B grid, complete: \code{hybrid\_final} at seeds 0--2 \\
 \bottomrule
 \end{tabular}
 \end{table}

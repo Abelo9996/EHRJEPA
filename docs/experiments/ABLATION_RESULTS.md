@@ -74,12 +74,17 @@ control covers both.
 
 ## (e) Decision: new default
 
-Default (`configs/pretrain_default.yaml`) remains: hybrid objective
+Default (`configs/pretrain_default.yaml`): hybrid objective
 (`objective.kind: nextlatent`), causal encoder (`model.causal: true`),
 horizons `[1, 4, 16]` (`objective.horizons`), `objective.lambda_recon: 0.1`,
 `objective.lambda_sigreg: 0.0` (SIGReg dropped, per the no-SIGReg result
-above). Target encoder: EMA or frozen AR teacher, pending `ablate4-desynpuf`
-(below).
+above). Target encoder: **EMA**, not the frozen AR teacher. `ablate4-desynpuf`
+(below) found the no-SIGReg and frozen-teacher gains do not stack -- combining
+them scores no higher than either alone -- so there is no accuracy reason to
+prefer the frozen teacher, and EMA is chosen because it is self-contained: it
+needs no separately trained 1B-token checkpoint staged before a run starts,
+whereas the frozen-teacher target has to be built first and shipped to
+wherever training happens.
 
 ## (f) Caveats
 
@@ -147,7 +152,47 @@ averaged over the six non-mortality tasks.
   `hybrid_textinit_frozen`) while removing 58% of the trainable parameters:
   the code table is 7,680,000 of the base-size hybrid's 13,208,336 trainable
   parameters; freezing it leaves 5,528,336 trainable.
-- `ablate4-desynpuf` (running) puts the frozen AR teacher and
+- `ablate4-desynpuf` (below) puts the frozen AR teacher and
   `lambda_sigreg: 0` in the same cell, two seeds, to test whether the two
   gains stack.
+
+## Grid 4: do the no-SIGReg and frozen-teacher gains stack? (`ablate4-desynpuf`)
+
+Source: [`docs/experiments/ablate4-desynpuf/summary.md`](ablate4-desynpuf/summary.md);
+protocol in [`ablate4-desynpuf/README.md`](ablate4-desynpuf/README.md),
+complete. Same base config, budget (200,000,000 nominal token slots per cell)
+and full held-out eval protocol as `ablate2-desynpuf`/`ablate3-desynpuf`. One
+configuration, `hybrid_nosig_frozen` (`model.target_mode: frozen`, loading the
+1B-token AR checkpoint as the target encoder and never updating it, plus
+`objective.lambda_sigreg: 0`), at `run.seed` 1 and 2 -- the frozen-teacher cell
+from Grid 3 with SIGReg additionally dropped.
+
+| run | inpatient | ckd | copd | diabetes | heart_failure | readmission | mean-of-6 |
+|---|---|---|---|---|---|---|---|
+| `hybrid_nosig_frozen_s1` | 0.7563 | 0.7812 | 0.7711 | 0.7768 | 0.7958 | 0.6923 | 0.7622 |
+| `hybrid_nosig_frozen_s2` | 0.7589 | 0.7796 | 0.7714 | 0.7759 | 0.7956 | 0.6941 | 0.7626 |
+| 2-seed mean | -- | -- | -- | -- | -- | -- | **0.7625** |
+
+### References (mean-of-6)
+
+| config | mean-of-6 |
+|---|---|
+| `hybrid_nosig` (no SIGReg alone, Grid 2) | 0.7615 |
+| `hybrid_frozen_ar` (frozen teacher alone, Grid 3) | 0.7615 |
+| `hybrid_nosig_frozen` (both, this grid) | 0.7625 |
+| `hybrid_base_s0` (EMA default, seed 0) | 0.7554 |
+
+### Findings
+
+- The two effects do not stack. `hybrid_nosig_frozen`'s 2-seed mean-of-6
+  (0.7625) is 0.0010 above either single-knob result (0.7615, 0.7615) and
+  0.0071 above the EMA default (0.7554) -- close to the size of a single
+  knob's own gain, not the sum of two (which would be roughly 0.7676 under
+  simple addition of the two +0.0061 gains over the default).
+- Combining the frozen teacher and no-SIGReg buys nothing over the
+  frozen-teacher-alone or no-SIGReg-alone cells individually, against a
+  2-seed spread on this grid's own two rows of 0.0004 (mean-of-6, 0.7622 vs.
+  0.7625).
+- Decision: the default target encoder is EMA, not the frozen AR teacher --
+  see the decision block above.
 
