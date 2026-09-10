@@ -1,4 +1,4 @@
-\begin{thebibliography}{21}
+\begin{thebibliography}{23}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -126,6 +126,17 @@ Pawel Renc, Yugang Jia, Anthony~E. Samir, Jaroslaw Was, Quanzheng Li, David~W.
 \newblock URL \url{https://arxiv.org/abs/2407.21124}.
 \newblock Introduces {ETHOS}.
 
+\bibitem[Reyna et~al.(2020)Reyna, Josef, Seyedi, Jeter, Shashikumar, Westover,
+  Sharma, Nemati, and Clifford]{reyna2019}
+Matthew~A. Reyna, Christopher~S. Josef, Salman Seyedi, Russell Jeter,
+  Supreeth~P. Shashikumar, M.~Brandon Westover, Ashish Sharma, Shamim Nemati,
+  and Gari~D. Clifford.
+\newblock Early prediction of sepsis from clinical data: The
+  {PhysioNet/Computing} in cardiology challenge 2019.
+\newblock \emph{Critical Care Medicine}, 48\penalty0 (2):\penalty0 210--217,
+  2020.
+\newblock \doi{10.1097/CCM.0000000000004145}.
+
 \bibitem[Shmatko et~al.(2025)Shmatko, Jung, Gaurav, Brunak, Mortensen, Birney,
   Fitzgerald, and Gerstung]{delphi2m}
 Artem Shmatko, Alexander~Wolfgang Jung, Kumar Gaurav, S{\o}ren Brunak,
@@ -135,6 +146,12 @@ Artem Shmatko, Alexander~Wolfgang Jung, Kumar Gaurav, S{\o}ren Brunak,
 \newblock \emph{Nature}, 647\penalty0 (8088):\penalty0 248--256, 2025.
 \newblock \doi{10.1038/s41586-025-09529-3}.
 \newblock Introduces {Delphi-2M}.
+
+\bibitem[Silva et~al.(2012)Silva, Moody, Scott, Celi, and Mark]{silva2012}
+Ikaro Silva, George Moody, Daniel~J. Scott, Leo~A. Celi, and Roger~G. Mark.
+\newblock Predicting in-hospital mortality of {ICU} patients: The
+  {PhysioNet/Computing} in cardiology challenge 2012.
+\newblock In \emph{Computing in Cardiology}, volume~39, pages 245--248, 2012.
 
 \bibitem[Steinberg et~al.(2023)Steinberg, Fries, Xu, and Shah]{motor}
 Ethan Steinberg, Jason Fries, Yizhe Xu, and Nigam Shah.

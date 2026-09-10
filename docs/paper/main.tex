@@ -123,7 +123,17 @@ for the trained predictor with context; a linear code-identity probe reads
 top-1 0.50 off the trained JEPA encoders against 0.60 off an untrained
 encoder and 0.71 off the AR encoder; and without SIGReg a plain context-mean
 baseline reaches cosine 0.73 to the targets. We report what the evidence
-supports and what it does not.
+supports and what it does not. Every pure latent-prediction variant tested
+loses to next-code prediction at matched compute; the hybrid's dense latent
+term is worth about two points of mean AUROC over AR alone at 1B tokens on
+the full split, three points on \code{readmission\_30d}, and about three
+points at $k{=}32$ few-shot, but the gain is not observed with the code loss
+removed. Whether a latent objective does work of its own on continuous,
+high-entropy targets, rather than riding on a code-prediction loss over
+discrete, low-entropy events, is untested here; a pre-registered comparison on
+two continuous hourly-ICU-state datasets, with a decision rule fixed before
+training, is specified in Section~\ref{sec:a2} and
+\code{docs/experiments/A2\_PLAN.md} and has not yet been run.
 \end{abstract}
 
 \vspace{2mm}
@@ -1596,6 +1606,185 @@ with Sections~\ref{sec:ablate2} and~\ref{sec:ablate4}'s measurement that
 dropping SIGReg is worth about $+0.6$ points on its own.
 
 %==============================================================================
+\section{Where latent prediction stands, and a pre-registered test on
+continuous state}
+\label{sec:a2}
+
+\subsection{What the DE-SynPUF evidence supports}
+
+Every pure latent-prediction variant measured in this paper loses to
+next-code AR at matched compute. At 48M tokens the five masked-span JEPA
+variants land at $-0.0046$ to $+0.0080$ against their own untrained control
+while AR lands at $+0.0445$; the dense causal next-latent cells without a
+code term (\code{nextlatent\_h1}, \code{nextlatent\_h1416}) reach $+0.0305$
+and $+0.0340$, still below AR in absolute mean (0.6669, 0.6704, against AR's
+0.7205); the window-pooled cells without a code term reach $+0.0337$ and
+still sit at 0.6702 mean, below AR. The hybrid's latent term is not free
+standing: it is measured only in combination with the tied code loss, and
+$\lambda_{\mathrm{pred}} = 0$ reduces the hybrid to AR exactly by
+construction (Section~\ref{sec:objectives}). Stripping the code loss instead
+of the latent term is what the dense and window cells above do, and none of
+them beats AR.
+
+At the budget where the comparison is most reliable --- 1B tokens, three
+seeds, the full 11{,}708-subject held-out split (Section~\ref{sec:final1b})
+--- the hybrid's contribution over AR is: mean-of-six AUROC $+0.0192$ (0.7628
+against 0.7436), $+0.0301$ on \code{readmission\_30d} (0.6881 against
+0.6580), and, in the $k{=}32$ few-shot regime on the same checkpoints
+(Table~\ref{tab:fewshot}), $+0.0320$ on the mean of six tasks (0.6578 against
+0.6258, computed from the per-task columns of that table). All three of
+these numbers are for the objective \emph{with} its code loss present; no
+cell in this paper isolates the latent term's contribution at 1B with the
+code loss removed, because \code{recon\_only} and the code-loss-free
+\code{nextlatent} cells were run only at 48M and 200M
+(Section~\ref{sec:scale}, Table~\ref{tab:scale}). At the budget where it was
+tested, removing the code loss and keeping only the latent term
+(\code{nextlatent\_h1416}, 200M scale is not present; the 48M point is the
+comparison available) does not retain the gain: \code{nextlatent\_h1416}
+reaches 0.6704 mean AUROC against AR's 0.7205 at the same 48M budget.
+
+\subsection{Diagnosed mechanism}
+
+Section~\ref{sec:diagnostics}'s three diagnostics, taken together, describe
+why a latent target built from this event stream is not hard to predict in a
+way that requires the encoder to carry much: a ridge regression from the
+mask token's time features alone, with no context, recovers $R^2 = 0.58$ of
+the layer-normed target against $R^2 = 0.79$ for the trained predictor with
+context, so most of what the predictor outputs is a function of \emph{when}
+the target falls, not of the patient; and a linear probe for a token's own
+\code{code\_id} reads top-1 0.50 off the trained JEPA encoder, \emph{below}
+0.60 off an untrained encoder of the same architecture and 0.71 off the AR
+encoder, so pretraining under the latent objective actively discards code
+identity relative to initialization. The two findings compose: a code
+stream that is mostly discrete, low-entropy, administratively arbitrary
+identifiers (Section~\ref{sec:data}) gives a latent target dominated by
+time-and-context priors that a predictor can satisfy without encoding which
+code occurred, and the encoder is not penalized for discarding that
+information because nothing in the latent loss requires it back.
+
+\subsection{Comparison to Clin-JEPA}
+
+Clin-JEPA \citep{clinjepa} pretrains a joint-embedding predictive objective
+directly on EHR patient trajectories, and its result is a useful boundary
+case for the reading above because its targets are not the discrete,
+low-entropy events this paper's latent objectives were measured against.
+Clin-JEPA's prediction targets are continuous hourly ICU state; its encoder
+is a pretrained Qwen3-8B with LoRA rather than a transformer trained from
+random initialization; it reports AUROC against a LightGBM baseline (.827
+LightGBM vs.\ .851 Clin-JEPA) and an LSTM baseline (.865 LSTM vs.\ .883
+Clin-JEPA), using 430 GPU-hours on eight H200s; and it reports no
+matched-compute next-token control, so whether its margin over LightGBM and
+the LSTM would survive a next-token objective trained on the same tokens and
+the same compute is not measured there. The margins Clin-JEPA reports
+(.024 over LightGBM, .018 over the LSTM) are of the same size as the
+margins measured here between the hybrid and AR (Section~\ref{sec:final1b}),
+which is the observation motivating the test below: a margin of this size
+over a non-latent baseline is exactly what this paper's own hybrid produces
+\emph{with} an auxiliary code loss present, and this paper has not measured
+whether a latent objective produces it \emph{without} one, on a continuous
+target, where the diagnosed mechanism above --- a time-conditional prior
+over low-entropy discrete events --- does not apply by construction.
+
+\subsection{The pre-registered test}
+\label{sec:a2plan}
+
+Two open hourly-ICU-state datasets, described in
+Table~\ref{tab:icudatasets}, are converted to the same MEDS layout used
+throughout this paper, with one event per measurement
+(\code{VAR//\textless name\textgreater} with a numeric value, following the
+code conventions of the \code{physionet2019} and \code{physionet2012} ETL
+modules): the PhysioNet/Computing in Cardiology 2019 early sepsis prediction
+challenge \citep{reyna2019} and the PhysioNet/Computing in Cardiology 2012
+in-hospital mortality challenge \citep{silva2012}.
+
+\begin{table}[h]
+\centering\small
+\caption{The two ICU datasets for the pre-registered test, converted to MEDS.
+Events and percent-numeric are measured directly on the converted MEDS
+extract (\code{data/meds/physionet2019}, \code{data/meds/physionet2012}).}
+\label{tab:icudatasets}
+\begin{tabular}{lrrrl}
+\toprule
+source & stays & events & \% numeric & task (held-out prevalence) \\
+\midrule
+PhysioNet/CinC 2019 \citep{reyna2019} & 40{,}336 & 12.2M & 99.1\% &
+  \code{sepsis\_6h} (1.7\%) \\
+ & & & & \code{sepsis\_stay} (5.6\%) \\
+PhysioNet/CinC 2012 \citep{silva2012} & 12{,}000 & 5.3M & 99.3\% &
+  \code{mortality\_inhospital/24h} (13.9\%) \\
+ & & & & \code{mortality\_inhospital/48h} (13.9\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\code{sepsis\_6h} labels sepsis onset within 6 hours, with prevalence 1.7\%
+over multi-anchor rows --- up to \code{MAX\_ANCHORS\_PER\_STAY} = 8 anchors
+per stay, drawn from a seeded hash, so rows are not independent within a stay
+(\code{ehrjepa.eval.icu\_tasks}). \code{sepsis\_stay} anchors once per stay
+at hour 12 and labels sepsis anywhere in the stay (5.6\%).
+\code{mortality\_inhospital/24h} and \code{/48h} anchor at hour 24 and hour
+48 respectively and label in-hospital death, both at 13.9\% prevalence. For
+all four tasks, history is strictly before the anchor and the labelling
+event strictly after, enforced by the same \code{windows\_at} choke point as
+every task in Section~\ref{sec:eval}; for \code{sepsis\_6h}, anchors at or
+after onset are dropped, and for the mortality tasks the outcome event is
+placed by the \code{physionet2012} ETL one hour past the 48-hour observation
+window, past both anchors, so neither task can see its own label in history.
+
+Count-feature baselines (Section~\ref{sec:eval}'s \code{lr} and \code{gbm}
+construction, unchanged), fit and scored on the full held-out split of each
+source, are reported in Table~\ref{tab:icubaselines}.
+
+\begin{table}[h]
+\centering\small
+\caption{Count-feature baseline AUROC on the full held-out split, both ICU
+sources (\code{docs/experiments/2026-09-10-eval-physionet2019/},
+\code{docs/experiments/2026-09-10-eval-physionet2012/}).}
+\label{tab:icubaselines}
+\begin{tabular}{lrr}
+\toprule
+task & \code{lr} & \code{gbm} \\
+\midrule
+\code{sepsis\_6h} & 0.785 & 0.836 \\
+\code{sepsis\_stay} & 0.768 & 0.769 \\
+\code{mortality\_inhospital/24h} & 0.789 & 0.829 \\
+\code{mortality\_inhospital/48h} & 0.828 & 0.859 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Objectives to be compared.} Six, at matched compute, two seeds
+each, on these two sources:
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
+\item AR over code and decile value bins (this paper's \code{ar}, applied to
+      the ICU vocabulary).
+\item AR plus continuous value regression: the code term unchanged, plus a
+      Huber loss on each event's per-code $z$-scored numeric value.
+\item Hybrid: next-latent plus code loss plus bin loss (this paper's
+      \code{nextlatent\_h1416\_recon} objective, unchanged).
+\item Latent plus continuous value regression, \emph{no} code loss: the
+      next-latent term of (3) plus the Huber value term of (2), with the
+      tied code-identity term removed.
+\item Pure latent: the next-latent term alone, no code loss, no value
+      regression.
+\item Hybrid with a pretrained encoder: a Qwen2.5-0.5B encoder with LoRA,
+      over events serialized from this paper's code
+      \emph{descriptions} (the same descriptions used by
+      \code{hybrid\_textinit}, Section~\ref{sec:ablate3}), not free text.
+\end{enumerate}
+
+\paragraph{Decision rule, stated before results.} If the latent objectives
+without a code loss --- (4) and (5) --- beat the binned-AR baseline (1) on
+these continuous-state tasks, latent prediction is doing work that
+token prediction is not, on this evidence. If they do not, the paper's
+claim is limited to the hybrid as a regularizer riding on a code-prediction
+loss, and the JEPA framing --- that predicting in representation space is
+itself the useful part --- is not supported by anything measured in this
+paper. This test has not been run; the design above and this decision rule
+are also recorded verbatim in \code{docs/experiments/A2\_PLAN.md}, written
+before training.
+
+%==============================================================================
 \section{Discussion}
 \label{sec:discussion}
 
@@ -1815,6 +2004,11 @@ ablation and scale grids through the final 1B default on the full held-out
 split (Section~\ref{sec:final1b}).
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
+\item Run the pre-registered test of Section~\ref{sec:a2}: six objectives at
+      matched compute, two seeds, on \code{physionet2019} and
+      \code{physionet2012}, against the decision rule fixed in
+      Section~\ref{sec:a2plan} and \code{docs/experiments/A2\_PLAN.md} before
+      training starts.
 \item Pretrain and evaluate on the full MIMIC-IV v3.1 extract, where laboratory
       values exist and the value path is actually exercised.
 \item Evaluate against the EHRSHOT task suite and MEDS-DEV, so that numbers
@@ -1960,6 +2154,10 @@ commit & date & result \\
 \code{5353d33} & 2026-09-08 & final-default 1B grid: full-held-out re-scoring of earlier 1B checkpoints \\
 \code{7134ec3} & 2026-09-10 & final-default 1B grid, complete: \code{hybrid\_final} at seeds 0--2 \\
 \code{44fcab4} & 2026-09-10 & few-shot evaluation of the six final 1B checkpoints, full held-out split \\
+\code{2862977} & 2026-09-10 & add \code{physionet2019} and \code{physionet2012} ETLs \\
+\code{7d0f7e8} & 2026-09-10 & add \code{sepsis\_6h}, \code{sepsis\_stay}, \code{mortality\_inhospital/\{24h,48h\}} tasks \\
+\code{3c1b30f} & 2026-09-10 & test the PhysioNet ETLs and the ICU task labels \\
+\code{b9b7053} & 2026-09-10 & record the \code{lr}/\code{gbm} baselines on both PhysioNet sources \\
 \bottomrule
 \end{tabular}
 \end{table}
