@@ -625,3 +625,229 @@ def test_summary_markdown_has_a_row_per_run_and_a_column_per_task() -> None:
     assert "last@final" in text and "mean@final" in text
     header, rule = text.splitlines()[6], text.splitlines()[7]
     assert header.count("|") == rule.count("|")
+
+
+# --------------------------------------------------------------------------- #
+# Evaluation modes
+# --------------------------------------------------------------------------- #
+
+
+def test_a_grid_defaults_to_probe_only_evaluation(tmp_path: Path) -> None:
+    """The historical behaviour, unchanged: one probe row per cell, no ft flags."""
+    grid = ablate.load_grid(_grid_file(tmp_path))
+    assert grid.eval_modes == ("probe",)
+    first, second = ablate.plan(grid)
+    assert first["eval_models"] == ["random_init", f"ckpt:{first['checkpoint']}"]
+    assert second["eval_models"] == [f"ckpt:{second['checkpoint']}"]
+
+
+def test_eval_modes_add_a_finetune_row_and_its_control(tmp_path: Path) -> None:
+    grid = ablate.load_grid(_grid_file(tmp_path, eval_modes=["probe", "finetune"]))
+    assert grid.eval_modes == ("probe", "finetune")
+    entry = ablate.plan(grid)[0]
+    assert entry["eval_models"] == [
+        "random_init",
+        "ft_random",
+        f"ckpt:{entry['checkpoint']}",
+        f"ft:{entry['checkpoint']}",
+    ]
+    # A finetune-only grid asks for neither the frozen probe nor its control.
+    only = ablate.load_grid(_grid_file(tmp_path, eval_modes=["finetune"]))
+    assert ablate.plan(only)[0]["eval_models"] == [
+        "ft_random",
+        f"ft:{entry['checkpoint']}",
+    ]
+
+
+def test_unknown_eval_modes_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="eval_modes"):
+        ablate.load_grid(_grid_file(tmp_path, eval_modes=["probe", "linear_head"]))
+    with pytest.raises(ValueError, match="eval_modes"):
+        ablate.load_grid(_grid_file(tmp_path, eval_modes=[]))
+
+
+def test_dry_run_lists_the_finetune_rows(tmp_path: Path, capsys) -> None:
+    """``--dry-run`` has to show the rows a mode adds, or the plan understates itself."""
+    path = _grid_file(tmp_path, eval_modes=["probe", "finetune"])
+    assert ablate.main([str(path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("eval      ft:") == 2, out
+    assert "eval      ft_random" in out
+    assert "eval      ckpt:" in out
+
+    # A probe-only grid prints exactly what it printed before the modes existed.
+    assert ablate.main([str(_grid_file(tmp_path)), "--dry-run"]) == 0
+    assert "eval " not in capsys.readouterr().out
+
+
+def test_eval_one_passes_the_finetune_flags_only_when_a_mode_asks(tmp_path: Path) -> None:
+    def command_for(**extra) -> list[str]:
+        grid = ablate.load_grid(_grid_file(tmp_path, **extra))
+        entry = ablate.plan(grid)[0]
+        captured: dict[str, list] = {}
+
+        def fake_spawn(command, log) -> None:
+            captured["command"] = list(command)
+            _fake_results(Path(entry["eval_dir"]))
+
+        real_spawn = ablate._spawn
+        ablate._spawn = fake_spawn  # type: ignore[assignment]
+        try:
+            log = ablate.Log(tmp_path / "log.txt")
+            ablate.eval_one(grid, entry, with_controls=True, log=log)
+            log.close()
+        finally:
+            ablate._spawn = real_spawn
+        return captured["command"]
+
+    probe_only = command_for()
+    assert "--ft-epochs" not in probe_only
+    assert "--ft-balanced" not in probe_only
+
+    tuned = command_for(eval_modes=["finetune"], ft_epochs=3, ft_balanced=True, ft_batch=16)
+    assert tuned[tuned.index("--ft-epochs") + 1] == "3"
+    assert tuned[tuned.index("--ft-batch") + 1] == "16"
+    assert "--ft-balanced" in tuned
+    models = tuned[tuned.index("--models") + 1].split(",")
+    assert models[0] == "ft_random" and models[1].startswith("ft:")
+
+
+def test_a_cell_is_done_only_when_every_mode_has_a_row(tmp_path: Path) -> None:
+    """Adding a mode to a finished grid re-evaluates its cells for that mode."""
+    both = ablate.load_grid(_grid_file(tmp_path, eval_modes=["probe", "finetune"]))
+    both.summary_json.parent.mkdir(parents=True, exist_ok=True)
+    both.summary_json.write_text(json.dumps({"runs": [{"run": "ar", "mode": "probe"}]}))
+    assert [e["done"] for e in ablate.plan(both)] == [False, False]
+
+    both.summary_json.write_text(
+        json.dumps({"runs": [{"run": "ar", "mode": "probe"}, {"run": "ar", "mode": "finetune"}]})
+    )
+    assert [e["done"] for e in ablate.plan(both)] == [True, False]
+
+    # A row written before `eval_modes` existed carries no mode and is a probe row.
+    probe_only = ablate.load_grid(_grid_file(tmp_path))
+    probe_only.summary_json.write_text(json.dumps({"runs": [{"run": "ar"}]}))
+    assert [e["done"] for e in ablate.plan(probe_only)] == [True, False]
+
+
+def test_a_row_reports_the_model_its_mode_names(tmp_path: Path) -> None:
+    entry = {
+        "run": "ar",
+        "objective": "ar",
+        "checkpoint": "runs/g/ar/final.pt",
+        "reuse": False,
+        "target_mode": None,
+        "lambda_sigreg": None,
+        "p_future": None,
+        "steps": 10,
+        "tokens": 100,
+        "batch_size": 64,
+        "max_len": 256,
+        "overrides": {},
+    }
+    scored = {
+        "ckpt:ar": {"mortality_365d": 0.70},
+        "ft:ar": {"mortality_365d": 0.75},
+    }
+    pooling = {"ckpt:ar": "last@final", "ft:ar": "last@final"}
+    probed = ablate._row(entry, {}, scored, pooling, "probe")
+    tuned = ablate._row(entry, {}, scored, pooling, "finetune")
+    assert probed["mode"] == "probe" and probed["auroc"]["mortality_365d"] == 0.70
+    assert tuned["mode"] == "finetune" and tuned["auroc"]["mortality_365d"] == 0.75
+    assert probed["steps"] == tuned["steps"] == 10
+
+
+def test_render_summary_shows_the_mode_column_and_the_ft_control() -> None:
+    payload = {
+        "grid": "g",
+        "base": "configs/pretrain_default.yaml",
+        "source": "physionet2019",
+        "updated": "2026-09-10T00:00:00+00:00",
+        "eval": {
+            "bootstrap": 200,
+            "eval_subject_limit": None,
+            "eval_subject_seed": 0,
+            "probe_features": "auto",
+            "probe_layer": "final",
+            "eval_modes": ["probe", "finetune"],
+            "ft_epochs": 5,
+        },
+        "runs": [
+            {"run": "ar_bins_s1", "mode": "probe", "auroc": {"sepsis_6h": 0.71}, "final": {}},
+            {"run": "ar_bins_s1", "mode": "finetune", "auroc": {"sepsis_6h": 0.80}, "final": {}},
+            # A legacy row, written before the mode column existed.
+            {"run": "ar_cont_s1", "auroc": {"sepsis_6h": 0.70}, "final": {}},
+        ],
+        "baselines": {
+            "gbm": {"sepsis_6h": 0.836},
+            "ft_random@ar_bins_s1": {"sepsis_6h": 0.78},
+        },
+    }
+    text = ablate.render_summary(payload)
+    assert "| mode |" in text
+    assert text.count("| `ar_bins_s1` | probe |") == 1
+    assert text.count("| `ar_bins_s1` | finetune |") == 1
+    assert "| `ar_cont_s1` | probe |" in text
+    assert "Evaluation modes: `probe`, `finetune`" in text
+    assert "`ft_random@<run>`" in text
+    assert "None" not in text
+
+
+def test_the_shipped_finetune_grids_plan_without_their_checkpoints(tmp_path: Path) -> None:
+    """The a2ft grids are authored for the GPU host and must dry-run anywhere.
+
+    Every cell reuses an ``a2-*`` checkpoint this machine may never have seen,
+    so planning has to name the row (``REUSE?``) rather than raise; only
+    ``run_grid`` insists the file is there.
+    """
+    for name in ("a2ft_physionet2019", "a2ft_physionet2012"):
+        grid = ablate.load_grid(REPO / "configs" / "grids" / f"{name}.yaml")
+        assert grid.eval_modes == ("finetune",), name
+        assert grid.ft_epochs == 5 and grid.ft_balanced is False
+        entries = ablate.plan(grid)
+        assert [e["run"] for e in entries] == [
+            "ar_bins_s1",
+            "hybrid_bins_s1",
+            "latent_cont_s1",
+            "latent_only_s1",
+            "hybrid_bins_lm_s1",
+        ], name
+        assert all(e["reuse"] for e in entries), "no cell may train"
+        assert all(e["tokens"] == 0 for e in entries)
+        for entry in entries:
+            rows = [m for m in entry["eval_models"] if not m.startswith("ft_random")]
+            assert rows == [f"ft:{entry['checkpoint']}"], entry["run"]
+        # The LM cell fine-tunes at a smaller batch; every other cell at 64.
+        batches = {e["run"]: e["ft_batch"] for e in entries}
+        assert batches.pop("hybrid_bins_lm_s1") == 4
+        assert set(batches.values()) == {64}
+        # The two architectures that get a from-scratch control, and only those.
+        with_controls = [e["run"] for e in entries if "ft_random" in e["eval_models"]]
+        assert with_controls == ["ar_bins_s1", "hybrid_bins_lm_s1"]
+        assert ablate.main([str(REPO / "configs" / "grids" / f"{name}.yaml"), "--dry-run"]) == 0
+
+
+def test_a_cell_may_override_the_finetuning_batch(tmp_path: Path) -> None:
+    """Per-cell, like ``budget_tokens``: a 0.5B encoder does not hold 64 windows."""
+    path = _grid_file(
+        tmp_path,
+        eval_modes=["finetune"],
+        ft_batch=32,
+        runs=[
+            {"name": "small", "overrides": {"objective.kind": "ar", "model.causal": True}},
+            {
+                "name": "lm",
+                "overrides": {"objective.kind": "ar", "model.causal": True},
+                "ft_batch": 4,
+            },
+        ],
+    )
+    grid = ablate.load_grid(path)
+    assert grid.ft_batch == 32
+    assert [e["ft_batch"] for e in ablate.plan(grid)] == [32, 4]
+
+    # An unknown per-run key is still an error.
+    with pytest.raises(ValueError, match="unknown keys"):
+        ablate.load_grid(
+            _grid_file(tmp_path, runs=[{"name": "x", "ft_epochs": 2}]),
+        )

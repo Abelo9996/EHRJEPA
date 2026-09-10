@@ -36,6 +36,15 @@ produced, its metrics read out of that run's ``metrics.csv``, and its row lands 
 pooling" a row rather than a footnote, and it never writes into the other grid's
 directory.
 
+**Probe or fine-tune, or both.** ``eval_modes: [probe, finetune]`` scores each
+cell twice: a logistic probe on the frozen encoder, and the same encoder trained
+end to end on the task the way the ICU literature compares an encoder to
+gradient boosting (:mod:`ehrjepa.eval.finetune`). Each mode is one row of the
+summary, told apart by the ``mode`` column, and both ride in the same eval
+command so the two are scored on identical anchors. The default is ``[probe]``
+alone, so every grid written before this existed plans and emits exactly the
+rows it did before.
+
 **Baselines computed once.** ``lr`` and ``gbm`` are count-feature models with no
 dependence on the encoder, so their held-out scores are read straight out of an
 earlier run's ``predictions.parquet`` (``reuse_predictions:``) rather than refit
@@ -83,11 +92,28 @@ from ehrjepa.train.config import load_config  # noqa: E402
 
 __all__ = ["Grid", "GridRun", "load_grid", "plan", "render_summary", "run_grid"]
 
+#: How each evaluation mode names a checkpoint's row and its untrained control
+#: in ``ehrjepa.eval.run --models``. ``probe`` fits a logistic regression on
+#: frozen features; ``finetune`` trains the encoder end to end on the task, the
+#: way the ICU literature compares an encoder to gradient boosting. A grid lists
+#: the modes it wants in ``eval_modes:`` and gets one summary row per (cell,
+#: mode); the default is ``[probe]``, so every grid written before this existed
+#: emits exactly the rows it did before.
+EVAL_MODES: dict[str, tuple[str, str]] = {
+    "probe": ("ckpt:", "random_init"),
+    "finetune": ("ft:", "ft_random"),
+}
+
 #: Columns of the per-run table, before the per-task AUROC columns.
 SUMMARY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("run", "run"),
+    ("mode", "mode"),
     ("objective", "objective"),
     ("pooling", "probe"),
+    # Blank outside ``finetune`` mode. Present because a cell may lower it (an
+    # LM encoder does not hold 64 windows), and a fine-tuned AUROC that was
+    # produced at a different batch has to say so.
+    ("ft_batch", "ft_bs"),
     ("target_mode", "target"),
     ("lambda_sigreg", "lambda"),
     ("p_future", "p_future"),
@@ -118,6 +144,12 @@ class GridRun:
     overrides: dict[str, Any] = field(default_factory=dict)
     budget_tokens: int = 0
     reuse_checkpoint: str | None = None
+    #: ``finetune`` mode only: this cell's fine-tuning batch, overriding the
+    #: grid's. Per-cell for the same reason ``budget_tokens`` is: a cell whose
+    #: encoder is a 0.5B language model does not hold the 64 windows a 13M one
+    #: does, and the alternative is shrinking every cell's batch to fit the
+    #: largest model in the grid.
+    ft_batch: int | None = None
 
     def override_strings(self) -> list[str]:
         return [f"{key}={_scalar(value)}" for key, value in self.overrides.items()]
@@ -156,6 +188,17 @@ class Grid:
     #: even untrained -- the causal one's CLS row is a constant -- so a grid that
     #: mixes objectives wants one control per objective, not one per grid.
     control_runs: tuple[str, ...] = ()
+    #: Which evaluation modes every cell gets, in :data:`EVAL_MODES`. The
+    #: default is the frozen probe alone, which is what every grid in
+    #: ``configs/grids/`` predating fine-tuning was run under.
+    eval_modes: tuple[str, ...] = ("probe",)
+    #: ``finetune`` mode only: the fine-tuning epoch cap and whether each epoch
+    #: is drawn class-balanced. Passed through to ``ehrjepa.eval.run``, and
+    #: absent from the command entirely when no mode asks for it.
+    ft_epochs: int = 5
+    ft_balanced: bool = False
+    #: Windows per fine-tuning step, overridable per cell (``GridRun.ft_batch``).
+    ft_batch: int = 64
     docs_root: Path = Path("docs/experiments")
     runs_root: Path = Path("runs")
     #: How often a training cell checkpoints to ``latest.pt``. Non-zero so a cell
@@ -206,6 +249,10 @@ def load_grid(path: str | Path) -> Grid:
         "reuse_models",
         "control_models",
         "control_runs",
+        "eval_modes",
+        "ft_epochs",
+        "ft_balanced",
+        "ft_batch",
         "docs_root",
         "runs_root",
         "ckpt_every",
@@ -222,7 +269,13 @@ def load_grid(path: str | Path) -> Grid:
     for item in raw["runs"]:
         if not isinstance(item, dict) or "name" not in item:
             raise ValueError(f"each run needs a name, got {item!r}")
-        extra = set(item) - {"name", "overrides", "budget_tokens", "reuse_checkpoint"}
+        extra = set(item) - {
+            "name",
+            "overrides",
+            "budget_tokens",
+            "reuse_checkpoint",
+            "ft_batch",
+        }
         if extra:
             raise ValueError(f"run {item['name']!r} has unknown keys: {sorted(extra)}")
         name = str(item["name"])
@@ -238,21 +291,26 @@ def load_grid(path: str | Path) -> Grid:
                 overrides=dict(item.get("overrides") or {}),
                 budget_tokens=int(item.get("budget_tokens", default_budget)),
                 reuse_checkpoint=str(reuse) if reuse else None,
+                ft_batch=int(item["ft_batch"]) if item.get("ft_batch") else None,
             )
         )
     fields = {
         key: raw[key]
         for key in known
-        - {"runs", "name", "base", "reuse_models", "control_models", "control_runs"}
+        - {"runs", "name", "base", "reuse_models", "control_models", "control_runs", "eval_modes"}
         if key in raw
     }
     for key in ("docs_root", "runs_root"):
         if key in fields:
             fields[key] = Path(fields[key])
-    for key in ("reuse_models", "control_models", "control_runs"):
+    for key in ("reuse_models", "control_models", "control_runs", "eval_modes"):
         if key in raw:
             fields[key] = tuple(raw[key])
     fields.setdefault("control_runs", (runs[0].name,))
+    fields.setdefault("eval_modes", ("probe",))
+    unknown_modes = set(fields["eval_modes"]) - set(EVAL_MODES)
+    if not fields["eval_modes"] or unknown_modes:
+        raise ValueError(f"eval_modes must be a non-empty subset of {sorted(EVAL_MODES)}")
     unknown_control = set(fields["control_runs"]) - seen
     if unknown_control:
         raise ValueError(f"control_runs names no such run: {sorted(unknown_control)}")
@@ -296,19 +354,70 @@ def steps_for(budget_tokens: int, batch_size: int, max_len: int, accum_steps: in
 
 def plan(grid: Grid) -> list[dict]:
     """One dict per run: resolved steps, directories, and whether it is done."""
-    done = {row["run"] for row in _load_rows(grid.summary_json)}
+    done = _finished_runs(grid)
     out = []
     for item in grid.runs:
         entry = _reuse_entry(item) if item.reuse_checkpoint else _train_entry(grid, item)
+        controls = item.name in grid.control_runs
         entry.update(
             run=item.name,
             overrides=dict(item.overrides),
             budget_tokens=item.budget_tokens,
             eval_dir=str(grid.doc_dir / "eval" / item.name),
+            eval_models=eval_models(grid, Path(entry["checkpoint"]), controls),
+            ft_batch=item.ft_batch or grid.ft_batch,
             done=item.name in done,
         )
         out.append(entry)
     return out
+
+
+def _finished_runs(grid: Grid) -> set[str]:
+    """Cells whose summary row is already present **for every mode** this grid runs.
+
+    A grid that gains a mode therefore re-evaluates its cells for the missing
+    mode instead of reporting them done; rows written before ``eval_modes``
+    existed carry no ``mode`` and are read as the probe rows they are.
+    """
+    seen: dict[str, set[str]] = {}
+    for row in _load_rows(grid.summary_json):
+        seen.setdefault(str(row["run"]), set()).add(str(row.get("mode", "probe")))
+    wanted = set(grid.eval_modes)
+    return {name for name, modes in seen.items() if wanted <= modes}
+
+
+def mode_controls(grid: Grid, mode: str) -> tuple[str, ...]:
+    """``grid.control_models``, renamed for the row kind ``mode`` produces.
+
+    The untrained control for a fine-tuned row is the same architecture
+    *fine-tuned from scratch* (``ft_random``), not a frozen probe on untrained
+    weights: a probe control cannot say whether the pretrained weights were a
+    better initialisation than none.
+    """
+    control = EVAL_MODES[mode][1]
+    return tuple(control if name == "random_init" else name for name in grid.control_models)
+
+
+def control_specs(grid: Grid) -> list[str]:
+    """Every control model spec this grid asks for, across its modes, once each."""
+    out: list[str] = []
+    for mode in grid.eval_modes:
+        for name in mode_controls(grid, mode):
+            if name not in out:
+                out.append(name)
+    return out
+
+
+def eval_models(grid: Grid, checkpoint: Path, with_controls: bool) -> list[str]:
+    """The ``--models`` list for one cell: one row per mode, controls first.
+
+    Every mode rides in the *same* command, so a probe row and a fine-tune row
+    of the same cell are scored on identical anchors and land in one
+    ``predictions.parquet`` -- which is what makes the paired bootstrap between
+    them a comparison rather than a coincidence.
+    """
+    models = [f"{EVAL_MODES[mode][0]}{checkpoint}" for mode in grid.eval_modes]
+    return [*control_specs(grid), *models] if with_controls else models
 
 
 def _train_entry(grid: Grid, item: GridRun) -> dict:
@@ -562,11 +671,13 @@ def eval_one(
     ``reuse_predictions`` file to read them from and they are not already cached
     in ``baselines.json`` -- so they are fit exactly once per grid, on whichever
     cell runs first, rather than once per row.
+
+    One command carries every mode in ``grid.eval_modes``, so the returned
+    mapping holds a ``ckpt:``-prefixed key per probed cell and an ``ft:``-prefixed
+    one per fine-tuned cell; :func:`_row` picks the one its mode names.
     """
     checkpoint = Path(entry["checkpoint"])
-    models = [f"ckpt:{checkpoint}"]
-    if with_controls:
-        models = [*grid.control_models, *models]
+    models = eval_models(grid, checkpoint, with_controls)
     if with_baselines:
         models = [*grid.reuse_models, *models]
     eval_dir = Path(entry["eval_dir"])
@@ -599,6 +710,15 @@ def eval_one(
             "--eval-subject-seed",
             str(grid.eval_subject_seed),
         ]
+    if "finetune" in grid.eval_modes:
+        command += [
+            "--ft-epochs",
+            str(grid.ft_epochs),
+            "--ft-batch",
+            str(entry.get("ft_batch") or grid.ft_batch),
+        ]
+        if grid.ft_balanced:
+            command.append("--ft-balanced")
     _spawn(command, log)
     results = json.loads((eval_dir / "results.json").read_text())
     out: dict[str, dict[str, float]] = {}
@@ -644,7 +764,7 @@ def baselines_for(
     if grid.reuse_predictions and not any(m in stored for m in grid.reuse_models):
         stored.update(_auroc_from_predictions(REPO / grid.reuse_predictions, grid.reuse_models))
     if fresh and run:
-        for model in grid.control_models:
+        for model in control_specs(grid):
             if model in fresh:
                 stored[control_name(model, run)] = dict(fresh[model])
         if not grid.reuse_predictions:
@@ -703,17 +823,22 @@ def run_grid(grid: Grid, only: Sequence[str] | None = None, force: bool = False)
                 log.say(f"trained {entry['run']} in {final['wall_s']:.0f}s")
             have = baselines_for(grid)
             controls_needed = entry["run"] in grid.control_runs and not all(
-                control_name(m, entry["run"]) in have for m in grid.control_models
+                control_name(m, entry["run"]) in have for m in control_specs(grid)
             )
             scored, pooling = eval_one(
                 grid, entry, controls_needed, log, baselines_needed(grid, have)
             )
             baselines_for(grid, scored, entry["run"])
-            row = _row(entry, final, scored, pooling)
-            payload["runs"] = [r for r in payload["runs"] if r["run"] != row["run"]] + [row]
+            for mode in grid.eval_modes:
+                row = _row(entry, final, scored, pooling, mode)
+                payload["runs"] = [
+                    r
+                    for r in payload["runs"]
+                    if (r["run"], r.get("mode", "probe")) != (row["run"], mode)
+                ] + [row]
+                log.say(f"done {entry['run']} [{mode}]: " + _auroc_line(row))
             payload["baselines"] = baselines_for(grid)
             _write_summary(grid, payload)
-            log.say(f"done {entry['run']}: " + _auroc_line(row))
     finally:
         payload["baselines"] = baselines_for(grid)
         _write_summary(grid, payload)
@@ -727,12 +852,20 @@ def _row(
     final: Mapping[str, float],
     scored: Mapping,
     pooling: Mapping[str, str] | None = None,
+    mode: str = "probe",
 ) -> dict:
+    """One summary row: this cell as scored under one evaluation mode.
+
+    The training columns are the cell's and are therefore identical across its
+    modes; only ``mode``, ``pooling`` and the per-task AUROCs differ.
+    """
     name = entry["run"]
-    matches = [k for k in scored if k.startswith("ckpt:")]
+    matches = [k for k in scored if k.startswith(EVAL_MODES[mode][0])]
     auroc = dict(scored[matches[0]]) if matches else {}
     return {
         "run": name,
+        "mode": mode,
+        "ft_batch": entry.get("ft_batch") if mode == "finetune" else None,
         "objective": entry["objective"],
         "pooling": (pooling or {}).get(matches[0]) if matches else None,
         "reuse_checkpoint": _short(Path(entry["checkpoint"])) if entry["reuse"] else None,
@@ -774,9 +907,23 @@ def _write_summary(grid: Grid, payload: dict) -> None:
         "seed": grid.seed,
         "probe_features": grid.probe_features,
         "probe_layer": grid.probe_layer,
+        "eval_modes": list(grid.eval_modes),
     }
+    if "finetune" in grid.eval_modes:
+        payload["eval"]["ft_epochs"] = grid.ft_epochs
+        payload["eval"]["ft_balanced"] = grid.ft_balanced
+        payload["eval"]["ft_batch"] = grid.ft_batch
     order = [item.name for item in grid.runs]
-    payload["runs"].sort(key=lambda r: order.index(r["run"]) if r["run"] in order else 99)
+    modes = list(grid.eval_modes)
+
+    def position(row: Mapping[str, Any]) -> tuple[int, int]:
+        mode = str(row.get("mode", "probe"))
+        return (
+            order.index(row["run"]) if row["run"] in order else 99,
+            modes.index(mode) if mode in modes else 99,
+        )
+
+    payload["runs"].sort(key=position)
     grid.doc_dir.mkdir(parents=True, exist_ok=True)
     grid.summary_json.write_text(json.dumps(payload, indent=2) + "\n")
     grid.summary_md.write_text(render_summary(payload))
@@ -824,11 +971,13 @@ def render_summary(payload: Mapping[str, Any]) -> str:
         if limit
         else "the full held-out split"
     )
+    modes = [str(m) for m in meta.get("eval_modes") or ["probe"]]
+    mode_note = "" if modes == ["probe"] else f" Evaluation modes: `{'`, `'.join(modes)}`."
     lines += [
         f"Base config `{payload.get('base', '')}`, source `{payload.get('source', '')}`, "
         f"held-out AUROC on {cohort}, {meta.get('bootstrap')} bootstrap resamples, "
         f"probe `{meta.get('probe_features')}@{meta.get('probe_layer')}` "
-        f"(the `probe` column gives each row's resolved pooling).",
+        f"(the `probe` column gives each row's resolved pooling).{mode_note}",
         "",
         f"Rows are appended by `scripts/ablate.py` as each run finishes. Last update: "
         f"{payload.get('updated', '')}.",
@@ -843,6 +992,10 @@ def render_summary(payload: Mapping[str, Any]) -> str:
         for key, _ in SUMMARY_COLUMNS:
             if key == "run":
                 cells.append(f"`{row['run']}`")
+            elif key == "mode":
+                # Rows written before ``eval_modes`` existed carry no mode and
+                # are the probe rows they say they are.
+                cells.append(_fmt(row.get("mode", "probe")))
             elif key in row:
                 cells.append(_fmt(row[key]))
             else:
@@ -867,6 +1020,12 @@ def render_summary(payload: Mapping[str, Any]) -> str:
             "`random_init@<run>` is that run's own architecture with untrained weights, probed "
             "identically -- the control for a causal encoder is an untrained causal encoder.",
         ]
+        if any(name.startswith("ft_random@") for name in baselines):
+            lines += [
+                "",
+                "`ft_random@<run>` is that architecture *fine-tuned from untrained weights* on "
+                "each task -- the train-from-scratch arm the `finetune` rows are read against.",
+            ]
     return "\n".join(lines) + "\n"
 
 
@@ -914,6 +1073,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{entry['objective']}/{_fmt(entry['target_mode'])} "
                 f"lambda={_fmt(entry['lambda_sigreg'])} p_future={_fmt(entry['p_future'])}{note}"
             )
+            # The eval rows this cell will produce, one per mode plus whatever
+            # controls it carries. Printed only when the grid asks for more than
+            # the historical probe-only evaluation, so a default grid's plan is
+            # byte-for-byte what it was.
+            if tuple(grid.eval_modes) != ("probe",):
+                for model in entry["eval_models"]:
+                    kind, _, path = model.partition(":")
+                    shown = f"{kind}:{_short(Path(path))}" if path else kind
+                    print(f"    {'eval':<9} {shown}")
         print(f"  total outstanding: {total:,} tokens")
         return 0
     run_grid(grid, only=only, force=args.force)
