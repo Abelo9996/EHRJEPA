@@ -16,6 +16,15 @@ dataset_families:
   "CMS DE-SynPUF": desynpuf
   Synthea: synthea
   MIMIC-IV: mimic
+  PhysioNet2019: physionet2019
+  PhysioNet2012: physionet2012
+
+# The two PhysioNet ICU sources deliberately map *no* concepts. Every task in
+# this file is a 30-to-365-day question asked of a longitudinal record, and a
+# single ICU stay -- 48 hours for challenge-2012, a few days for challenge-2019
+# -- cannot answer one; `task_specs_for` therefore skips all of them there. Their
+# own tasks are hourly and are built in ehrjepa.eval.icu_tasks, which computes
+# anchors and labels in polars rather than through this table.
 
 concepts:
   death:

@@ -92,9 +92,24 @@ class TaskSpec:
     anchor_concept: str | None = None
     #: Concepts that must exist in the source for this task to be defined.
     requires: tuple[str, ...] = field(default=())
+    #: Source families this task is defined on, or empty for "any family that has
+    #: the concepts". Set for tasks whose *shape*, not just vocabulary, is
+    #: source-specific -- an hourly ICU task means nothing on claims data.
+    families: tuple[str, ...] = field(default=())
+    #: Name of a builder in :mod:`ehrjepa.eval.icu_tasks`. When set, anchors and
+    #: labels are computed there in native polars and ACES is not involved;
+    #: ``config``, ``horizon_days`` and ``predicates`` are then unused.
+    builder: str | None = None
+
+    @property
+    def is_multi_anchor(self) -> bool:
+        """Whether this task may emit more than one anchor for the same subject."""
+        return self.builder == "sepsis_6h"
 
     @property
     def needed_concepts(self) -> tuple[str, ...]:
+        if self.builder is not None:
+            return ()
         names = {c for p, c in self.predicates.items() if p != "anchor"}
         names.update(self.requires)
         if self.anchor_concept:
@@ -137,7 +152,50 @@ def _default_specs() -> tuple[TaskSpec, ...]:
         )
         for short, concept in _CHRONIC.items()
     ]
+    specs += list(_icu_specs())
     return tuple(specs)
+
+
+def _icu_specs() -> tuple[TaskSpec, ...]:
+    """The hourly ICU tasks, built in :mod:`ehrjepa.eval.icu_tasks`, not by ACES.
+
+    ``horizon_days`` is carried only so the dataclass stays one shape; these
+    builders take their horizon in hours and never consult it.
+    """
+    return (
+        TaskSpec(
+            name="sepsis_6h",
+            config="",
+            horizon_days=0,
+            predicates={},
+            families=("physionet2019",),
+            builder="sepsis_6h",
+        ),
+        TaskSpec(
+            name="sepsis_stay",
+            config="",
+            horizon_days=0,
+            predicates={},
+            families=("physionet2019",),
+            builder="sepsis_stay",
+        ),
+        TaskSpec(
+            name="mortality_inhospital/24h",
+            config="",
+            horizon_days=0,
+            predicates={},
+            families=("physionet2012",),
+            builder="mortality_inhospital_24h",
+        ),
+        TaskSpec(
+            name="mortality_inhospital/48h",
+            config="",
+            horizon_days=0,
+            predicates={},
+            families=("physionet2012",),
+            builder="mortality_inhospital_48h",
+        ),
+    )
 
 
 #: Every task this module knows how to build, in report order.
@@ -199,6 +257,9 @@ def task_specs_for(
             raise ValueError(f"unknown tasks: {sorted(unknown)}")
     supported, skipped = [], {}
     for spec in wanted:
+        if spec.families and family not in spec.families:
+            skipped[spec.name] = f"not defined on source family {family!r}"
+            continue
         missing = [c for c in spec.needed_concepts if concept_matcher(c, family, concepts) is None]
         if missing:
             skipped[spec.name] = missing[0]
@@ -406,6 +467,21 @@ def build_task(
     concepts = load_concepts(config_dir)
     if events is None:
         events = read_events(meds_dir)
+
+    if spec.builder is not None:
+        from ehrjepa.eval.icu_tasks import BUILDERS
+
+        labelled, counts = BUILDERS[spec.builder](events, meds_dir, seed=seed)
+        counts["task"] = spec.name
+        counts["source_family"] = family
+        counts["seed"] = seed
+        counts["builder"] = spec.builder
+        keys = labelled.select("subject_id", "anchor_time")
+        if keys.unique().height != keys.height:
+            raise ValueError(f"task {spec.name} produced a duplicate (subject, anchor) pair")
+        if not spec.is_multi_anchor and labelled["subject_id"].n_unique() != labelled.height:
+            raise ValueError(f"task {spec.name} produced more than one anchor per subject")
+        return labelled, counts
 
     def matcher(concept: str) -> pl.Expr:
         expr = concept_matcher(concept, family, concepts)
