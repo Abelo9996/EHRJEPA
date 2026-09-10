@@ -246,7 +246,8 @@ src/ehrjepa/
   objectives/  latent prediction loss, SIGReg anti-collapse regularizer,
                next-code cross-entropy
   train/       YAML config, training loop, checkpointing
-  eval/        MEDS-DEV/ACES + EHRSHOT tasks, frozen-encoder probes, baselines
+  eval/        MEDS-DEV/ACES + EHRSHOT tasks, frozen-encoder probes,
+               end-to-end fine-tuning, baselines
   utils/       seeding, device selection, logging, run directories
 scripts/       ablate.py (ablation grids), throughput.py (tok/s measurement)
 configs/       YAML run configs and ablation grids (configs/grids/)
@@ -270,6 +271,16 @@ flowchart LR
 *Anchors are drawn strictly before any death event, so no event at or after
 `MEDS_DEATH` ever enters a history window; `random_init` runs the same probe
 through the same, but untrained, architecture as its control.*
+
+A checkpoint can also be scored the way the ICU literature scores one: trained
+end to end on the task rather than probed frozen. `--models
+ft:<ckpt>,ft_random` (`ehrjepa.eval.finetune`) attaches a `LayerNorm + Linear`
+head to the same pooled representation the probe reads, fine-tunes encoder and
+head together with early stopping on the tuning split, and writes its held-out
+scores into the same `predictions.parquet` — so a probe row, a fine-tuned row,
+a from-scratch row and `gbm` are all compared by one paired bootstrap on
+identical anchors. An ablation grid asks for both with
+`eval_modes: [probe, finetune]` and gets one summary row per mode.
 
 ## Roadmap
 
