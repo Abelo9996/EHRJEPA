@@ -1,0 +1,29 @@
+{
+  "gbm": {
+    "inpatient_365d": 0.7455354437475381,
+    "mortality_365d": 0.5564135296678937,
+    "new_dx_365d/ckd": 0.7712966398778753,
+    "new_dx_365d/copd": 0.7676594926979246,
+    "new_dx_365d/diabetes": 0.7709418433766133,
+    "new_dx_365d/heart_failure": 0.7840384082798201,
+    "readmission_30d": 0.6670239951489952
+  },
+  "lr": {
+    "inpatient_365d": 0.7124207514111908,
+    "mortality_365d": 0.5658631199778332,
+    "new_dx_365d/ckd": 0.7390260043682433,
+    "new_dx_365d/copd": 0.7325724120480661,
+    "new_dx_365d/diabetes": 0.7367579317574143,
+    "new_dx_365d/heart_failure": 0.7407228077585337,
+    "readmission_30d": 0.6529365904365904
+  },
+  "random_init@hybrid_final_s0": {
+    "inpatient_365d": 0.6741953940016148,
+    "mortality_365d": 0.5405909828603096,
+    "new_dx_365d/ckd": 0.6857351800050322,
+    "new_dx_365d/copd": 0.6906223592936156,
+    "new_dx_365d/diabetes": 0.7185401830295715,
+    "new_dx_365d/heart_failure": 0.689703576294625,
+    "readmission_30d": 0.6166168572418573
+  }
+}
