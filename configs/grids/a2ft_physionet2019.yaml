@@ -1,0 +1,133 @@
+# A2-FT on PhysioNet/CinC 2019 (sepsis): the same five checkpoints, fine-tuned
+# end to end instead of probed frozen. Pre-registered in
+# docs/experiments/a2ft-physionet2019/README.md; this file is the mechanism.
+#
+# The question, in one sentence: `configs/grids/a2_physionet2019.yaml` compares
+# every objective through a logistic probe on frozen features, and the ICU
+# literature does not -- it fine-tunes the encoder on the task and reports that
+# number against gradient boosting and against the same architecture trained
+# from scratch. Two things can only be read from the fine-tuned table:
+#
+#   1. does fine-tuning close the gap to `gbm` (0.836 on `sepsis_6h`, 0.769 on
+#      `sepsis_stay`, docs/experiments/2026-09-10-eval-physionet2019/), which no
+#      frozen probe in this project has done on any source; and
+#   2. does the *ordering* of the objectives survive fine-tuning -- a
+#      pretraining objective that produces the more probeable representation
+#      need not produce the better initialisation, and the a2 decision rule is
+#      written on probes alone.
+#
+# Nothing is trained here. Every row names `reuse_checkpoint:` -- the `final.pt`
+# the a2 grid already wrote on the GPU host -- so this grid costs five
+# fine-tuning runs and two controls, and never touches the a2 grid's directory.
+# `--dry-run` works on a machine that has none of those files: an absent
+# checkpoint plans as `REUSE?` and only `run_grid` insists on it.
+#
+# `eval_modes: [finetune]` gives each cell one `ft:` row and no probe row: the
+# probe numbers already exist in docs/experiments/a2-physionet2019/summary.md on
+# the same cohort, the same seed and the same bootstrap count, and re-fitting
+# them here would be two tables of the same thing. The two are read side by side
+# by run name.
+#
+# Five cells, not six. `ar_cont_s1` is left out: it is a control on the
+# *auxiliary* (predict the number rather than the bin) and its probe row already
+# answers what it is there to answer, while a fine-tuning run costs the same as
+# any other cell. The five kept are the ones the pre-registered question turns
+# on -- `latent_cont` and `latent_only` (no code loss), the `hybrid_bins` and
+# `ar_bins` they are read against, and the LM cell.
+#
+# Seed 1 only. A fine-tune is a second training run per cell and the seed-2
+# checkpoints answer "is the probe difference a draw", which is a question about
+# pretraining, not about fine-tuning. If a seed-1 fine-tuned ordering disagrees
+# with the probed ordering, that is what seed 2 is for, and it is a separate
+# grid rather than a doubling of this one.
+#
+# Fine-tuning settings: `ft_epochs: 5` with early stopping on tuning-split
+# AUROC at patience 2, batch 64 windows of each checkpoint's own `max_len`,
+# AdamW at 2e-5 on the encoder / 1e-3 on the head / 1e-4 on the LM cell's LoRA
+# adapters, 5% linear warmup then cosine. All of it is fixed in
+# src/ehrjepa/eval/finetune.py rather than tuned per cell; the tuning split
+# chooses when to stop and nothing else.
+#
+# What a row costs. `sepsis_6h` has 251,991 train anchors (up to eight per stay),
+# so an epoch is 3,938 optimizer steps at batch 64 x 512 and five epochs is 645M
+# nominal token slots -- six times what the cell was pretrained on. Early
+# stopping can cut that to three epochs; the worst case is what to plan against.
+# docs/experiments/a2ft-physionet2019/README.md carries the arithmetic and says
+# to time one cell at `--ft-epochs 1` on the real card before launching the
+# grid. If five epochs does not fit, lower `ft_epochs` here *and* in
+# configs/grids/a2ft_physionet2012.yaml, so every arm gets the same budget.
+#
+# `ft_balanced: false`. `sepsis_6h` is a 1.7%-prevalence task and balancing the
+# epoch is the obvious thing to reach for, but the probe it is compared against
+# is a logistic regression at `class_weight=None`, and re-weighting one arm
+# would change the calibration of the scores that Brier and the calibration
+# slope are reported on. The flag exists (`--ft-balanced`) for a follow-up that
+# asks that question of every arm at once.
+#
+# `eval_subject_limit: null` scores all 4,006 held-out subjects, as the a2 grid
+# does. `reuse_predictions` is deliberately unset: the a2 grid's `lr`/`gbm`
+# scores live in one of its per-cell `predictions.parquet` files, which need not
+# exist on the machine that runs this grid, and a silently missing baseline
+# block is worse than fitting them once here. They should reproduce the
+# reference numbers above -- same cohort, same anchors, same seed.
+
+name: a2ft-physionet2019
+base: configs/pretrain_default.yaml
+source: physionet2019
+budget_tokens: 0
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# Two from-scratch controls, not five. A fine-tune trains the embedding, the
+# encoder and the task head; every pretraining head and the EMA target copy are
+# frozen because they are not on the path from a window to a logit. So the
+# from-scratch twin of an `ar` cell and of a `nextlatent` cell is the *same*
+# 6L/256d causal encoder at the same initialisation -- the classes differ only
+# in modules a fine-tune does not touch -- and running it twice would spend a
+# second GPU-hour to measure the same quantity. The LM cell is a genuinely
+# different architecture and keeps its own control: a pretrained Qwen trunk with
+# untrained adapters and projection, fine-tuned on the task, which is the
+# control for "what did the a2 LoRA pretraining add" and not for "what did
+# Qwen's pretraining add".
+control_runs: [ar_bins_s1, hybrid_bins_lm_s1]
+
+runs:
+  - name: ar_bins_s1
+    reuse_checkpoint: runs/a2-physionet2019/ar_bins_s1/final.pt
+
+  - name: hybrid_bins_s1
+    reuse_checkpoint: runs/a2-physionet2019/hybrid_bins_s1/final.pt
+
+  - name: latent_cont_s1
+    reuse_checkpoint: runs/a2-physionet2019/latent_cont_s1/final.pt
+
+  - name: latent_only_s1
+    reuse_checkpoint: runs/a2-physionet2019/latent_only_s1/final.pt
+
+  # `ft_batch: 4` because 64 windows of 160 events through a 0.5B trunk do not
+  # fit an 8 GB card: pretraining this cell needed `run.batch_size: 2` with
+  # `optim.accum_steps: 8`. A fine-tune's graph is smaller than that pass -- no
+  # target encoder, no next-latent heads, one logit per window instead of a
+  # softmax over the vocabulary per event -- so 4 is the starting point, not a
+  # measurement;
+  # time one epoch on the real card first. Its own control (`ft_random`) rides
+  # in the same command and therefore shares the batch, so the comparison that
+  # matters for this cell is unaffected; the comparison to the from-scratch
+  # cells now differs in batch as well as in budget, which is one more reason
+  # this row is not a matched-compute row.
+  - name: hybrid_bins_lm_s1
+    ft_batch: 4
+    reuse_checkpoint: runs/a2-physionet2019/hybrid_bins_lm_s1/final.pt

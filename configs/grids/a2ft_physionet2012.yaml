@@ -1,0 +1,81 @@
+# A2-FT on PhysioNet/CinC 2012 (in-hospital mortality): the same five
+# checkpoints as a2-physionet2012, fine-tuned end to end instead of probed
+# frozen. Pre-registered in docs/experiments/a2ft-physionet2012/README.md.
+#
+# Identical in construction to configs/grids/a2ft_physionet2019.yaml -- read
+# that file's header for the reasoning behind every setting below (why no
+# training, why `eval_modes: [finetune]` and no probe row, why five cells and
+# one seed, why two from-scratch controls rather than five, why
+# `ft_balanced: false`). Two differences, both properties of the source:
+#
+#   * `source: physionet2012`, whose tasks are `mortality_inhospital/24h` and
+#     `/48h` (anchors at ICU hour 24 and 48). `tasks: all` selects them; the
+#     2019 sepsis tasks are not defined on this family.
+#   * the gap to close is a different one. Count-feature baselines on this
+#     source (docs/experiments/2026-09-10-eval-physionet2012/):
+#
+#       | task                       |   lr |  gbm |
+#       |----------------------------|------|------|
+#       | mortality_inhospital/24h   | .789 | .829 |
+#       | mortality_inhospital/48h   | .828 | .859 |
+#
+#     Both tasks are ~13.9% prevalence -- an order of magnitude commoner than
+#     `sepsis_6h` -- and one anchor per stay, so unlike the 2019 grid every row
+#     here is an independent subject and the bootstrap interval is not
+#     optimistic.
+#
+# 1,156 held-out subjects, all of them. A cell's fine-tune therefore sees a
+# train split of about 9,600 anchors, which at batch 64 is 150 optimizer steps
+# per epoch and at most five epochs -- a few minutes per from-scratch cell on
+# the 4060, and the LM cell the same order of magnitude slower per step it is in
+# pretraining.
+
+name: a2ft-physionet2012
+base: configs/pretrain_default.yaml
+source: physionet2012
+budget_tokens: 0
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+control_runs: [ar_bins_s1, hybrid_bins_lm_s1]
+
+runs:
+  - name: ar_bins_s1
+    reuse_checkpoint: runs/a2-physionet2012/ar_bins_s1/final.pt
+
+  - name: hybrid_bins_s1
+    reuse_checkpoint: runs/a2-physionet2012/hybrid_bins_s1/final.pt
+
+  - name: latent_cont_s1
+    reuse_checkpoint: runs/a2-physionet2012/latent_cont_s1/final.pt
+
+  - name: latent_only_s1
+    reuse_checkpoint: runs/a2-physionet2012/latent_only_s1/final.pt
+
+  # `ft_batch: 4` because 64 windows of 160 events through a 0.5B trunk do not
+  # fit an 8 GB card: pretraining this cell needed `run.batch_size: 2` with
+  # `optim.accum_steps: 8`. A fine-tune's graph is smaller than that pass -- no
+  # target encoder, no next-latent heads, one logit per window instead of a
+  # softmax over the vocabulary per event -- so 4 is the starting point, not a
+  # measurement;
+  # time one epoch on the real card first. Its own control (`ft_random`) rides
+  # in the same command and therefore shares the batch, so the comparison that
+  # matters for this cell is unaffected; the comparison to the from-scratch
+  # cells now differs in batch as well as in budget, which is one more reason
+  # this row is not a matched-compute row.
+  - name: hybrid_bins_lm_s1
+    ft_batch: 4
+    reuse_checkpoint: runs/a2-physionet2012/hybrid_bins_lm_s1/final.pt
