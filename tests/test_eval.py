@@ -767,3 +767,187 @@ def test_ckpt_cache_name_is_keyed_on_checkpoint_content(tmp_path: Path) -> None:
 
     # Display name in summary tables stays the plain run-directory name.
     assert spec_a.name == "ckpt:ar"
+
+
+# --------------------------------------------------------------------------- #
+# Fine-tuning
+# --------------------------------------------------------------------------- #
+
+
+def _ar_checkpoint(path: Path, max_len: int = 32) -> Path:
+    """A loadable, millisecond-sized ``ar`` checkpoint.
+
+    Written by hand rather than trained: everything below is about what
+    :mod:`ehrjepa.eval.finetune` does with an architecture, not about what
+    training put in it.
+    """
+    from dataclasses import asdict
+
+    import torch
+
+    from ehrjepa.models.ar import EHRAR
+    from ehrjepa.models.jepa import EHRJEPAConfig
+
+    config = EHRJEPAConfig(vocab_size=24, dim=16, depth=1, heads=2, n_freq=4, causal=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_config": asdict(config),
+            "config": {"data": {"max_len": max_len}, "objective": {"kind": "ar"}},
+            "model": EHRAR(config).state_dict(),
+        },
+        path,
+    )
+    return path
+
+
+def test_early_stopping_triggers_on_a_monotone_decreasing_curve() -> None:
+    """Two epochs without a new best ends the run; one improvement resets it."""
+    from ehrjepa.eval import finetune
+
+    curve = [0.80, 0.72, 0.64, 0.55]
+    assert finetune.stop_early(curve[:1]) is False
+    assert finetune.stop_early(curve[:2]) is False, "one bad epoch is inside the patience"
+    assert finetune.stop_early(curve[:3]) is True
+    assert finetune.stop_early(curve) is True
+    # An improvement anywhere inside the window keeps the run alive.
+    assert finetune.stop_early([0.80, 0.72, 0.81]) is False
+    assert finetune.stop_early([0.80, 0.81, 0.72]) is False
+    # A tuning AUROC that is undefined (single-class split) is never a best.
+    assert finetune.stop_early([float("nan")] * 3) is True
+    # patience=0 disables the rule rather than stopping immediately.
+    assert finetune.stop_early(curve, patience=0) is False
+
+
+def test_ft_random_builds_the_same_architecture_with_untrained_weights(tmp_path: Path) -> None:
+    """The from-scratch control is the checkpoint's own shape, minus its weights."""
+    import torch
+
+    from ehrjepa.eval import finetune
+
+    checkpoint = _ar_checkpoint(tmp_path / "cell" / "final.pt")
+    trained, max_len = finetune.build_model(checkpoint, features="last")
+    untrained, _ = finetune.build_model(checkpoint, features="last", random_init=True)
+
+    assert max_len == 32
+    assert type(trained.backbone) is type(untrained.backbone)
+    left, right = trained.state_dict(), untrained.state_dict()
+    assert left.keys() == right.keys()
+    assert all(left[key].shape == right[key].shape for key in left)
+    assert any(not torch.equal(left[key], right[key]) for key in left)
+
+    # The pretrained arm really carries the file's weights.
+    stored = torch.load(checkpoint, map_location="cpu", weights_only=False)["model"]
+    assert all(torch.equal(left[f"backbone.{key}"], value) for key, value in stored.items())
+
+
+def test_a_fine_tune_trains_the_encoder_and_the_head_and_nothing_else(tmp_path: Path) -> None:
+    """The pretraining heads are frozen: they are not on the path to a logit."""
+    from ehrjepa.eval import finetune
+
+    checkpoint = _ar_checkpoint(tmp_path / "cell" / "final.pt")
+    model, _ = finetune.build_model(checkpoint, features="last")
+    trainable = {name for name, p in model.named_parameters() if p.requires_grad}
+
+    assert "head.weight" in trainable and "norm.weight" in trainable
+    assert not [name for name in trainable if name.startswith("backbone.head")]
+    assert all(
+        name.startswith(("backbone.embed.", "backbone.encoder.", "head.", "norm."))
+        for name in trainable
+    ), sorted(trainable)
+    assert model.n_trainable() < sum(p.numel() for p in model.parameters())
+    rates = {group["base_lr"] for group in finetune.param_groups(model)}
+    assert rates == {finetune.ENCODER_LR, finetune.HEAD_LR}
+
+
+def test_parse_models_reads_the_fine_tuning_specs(tmp_path: Path) -> None:
+    causal = _stub_checkpoint(tmp_path / "ar" / "final.pt", causal=True)
+    specs = run.parse_models([f"ft:{causal}", "ft_random"])
+    assert [s.name for s in specs] == ["ft:ar", "ft_random"]
+    assert [s.kind for s in specs] == ["finetune", "finetune"]
+    assert specs[1].random_init and specs[1].checkpoint == causal
+    # `auto` resolves the same way it does for a probe: causal -> `last`.
+    assert [s.probe_features for s in specs] == ["last", "last"]
+    assert [s.features for s in specs] == ["last@final", "last@final"]
+
+    # A named control does not need a `ft:` row to copy from; a bare one does.
+    named = run.parse_models([f"ft_random:{causal}"])
+    assert named[0].name == "ft_random" and named[0].checkpoint == causal
+    with pytest.raises(ValueError, match="ft_random"):
+        run.parse_models(["lr", "ft_random"])
+
+
+def test_epoch_order_is_seeded_and_balances_only_when_asked() -> None:
+    from ehrjepa.eval import finetune
+
+    labels = np.array([0] * 20 + [1] * 4)
+    plain = finetune.epoch_order(labels, epoch=0, seed=0)
+    assert np.array_equal(np.sort(plain), np.arange(labels.size)), "a permutation, nothing dropped"
+    assert np.array_equal(plain, finetune.epoch_order(labels, epoch=0, seed=0))
+    assert not np.array_equal(plain, finetune.epoch_order(labels, epoch=1, seed=0))
+
+    balanced = finetune.epoch_order(labels, epoch=0, seed=0, balanced=True)
+    assert balanced.size == labels.size, "an epoch is the same number of steps either way"
+    assert labels[balanced].mean() == pytest.approx(0.5, abs=0.05)
+
+    # A single-class split cannot be balanced, and falls back rather than raising.
+    single = finetune.epoch_order(np.zeros(8, dtype=np.int64), 0, 0, balanced=True)
+    assert np.array_equal(np.sort(single), np.arange(8))
+
+
+@requires_aces
+@requires_demo
+def test_two_epochs_of_fine_tuning_on_the_demo_cache(tmp_path: Path) -> None:
+    """A fine-tune and its from-scratch control, on CPU, in seconds not minutes."""
+    import time
+
+    from ehrjepa.train.config import load_config
+    from ehrjepa.train.pretrain import Trainer
+
+    started = time.time()
+    config = load_config(
+        DEBUG_CONFIG,
+        [f"run.out_dir={tmp_path / 'run'}", "run.steps=3", "run.tensorboard=false"],
+    )
+    Trainer(config).train()
+    checkpoint = tmp_path / "run" / "final.pt"
+
+    results = run.run(
+        "mimic-demo",
+        run.parse_models([f"ft:{checkpoint}", "ft_random"]),
+        tmp_path / "out",
+        meds_root=REPO / "data" / "meds",
+        cache_root=REPO / "data" / "cache",
+        task_root=tmp_path / "tasks",
+        feature_cache=None,
+        task_names=["mortality_365d"],
+        n_boot=20,
+        device="cpu",
+        few_shot=False,
+        ft_epochs=2,
+        ft_batch=8,
+    )
+
+    entry = results["tasks"]["mortality_365d"]
+    assert set(entry["models"]) == {"ft:run", "ft_random"}
+    assert results["finetune"]["max_epochs"] == 2
+    assert results["finetune"]["batch_size"] == 8
+    for name, model in entry["models"].items():
+        assert model["kind"] == "finetune"
+        assert set(model["metrics"]) == set(metrics.METRICS)
+        assert 1 <= model["params"]["epochs_run"] <= 2
+        assert len(model["grid"]) == model["params"]["epochs_run"]
+        assert model["params"]["random_init"] is (name == "ft_random")
+        assert model["params"]["max_len"] == 64
+        assert model["params"]["batch_size"] == 8
+    assert entry["paired"], "a fine-tune must still be paired against its control"
+
+    # Predictions in the layout the probe writes, so metrics/report and the
+    # bootstrap read them without knowing a fine-tune produced them.
+    frame = pl.read_parquet(tmp_path / "out" / "predictions.parquet")
+    assert frame.columns == ["subject_id", "anchor_time", "label", "task", "model", "score"]
+    assert frame.height == 2 * entry["counts"]["held_out"]
+    assert set(frame["model"].unique()) == {"ft:run", "ft_random"}
+    assert frame["score"].is_between(0.0, 1.0).all()
+    assert (tmp_path / "out" / "results.md").exists()
+    assert time.time() - started < 30.0

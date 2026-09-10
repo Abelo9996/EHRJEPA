@@ -453,3 +453,70 @@ def _np(values, dtype=int):
     import numpy as np
 
     return np.asarray(values, dtype=dtype)
+
+
+@requires_cache
+@requires_tokenizer
+def test_fine_tuning_an_lm_checkpoint_moves_the_adapters_and_the_head_only(tmp_path: Path) -> None:
+    """``ehrjepa.eval.finetune`` on an ``encoder: lm`` checkpoint.
+
+    The frozen trunk has to stay frozen, the adapters have to get their own
+    (lower) learning rate, and the code table -- which is the next-code head's
+    output projection and is not on the path from a window to a logit -- has to
+    be left alone.
+    """
+    from ehrjepa.eval import finetune
+
+    overrides = {
+        "data.cache_dir": str(ICU_CACHE),
+        "data.max_len": 24,
+        "data.min_len": 8,
+        "model.encoder": "lm",
+        "model.causal": "true",
+        "model.lm_tokenizer": "gpt2",
+        "model.lm_lora_targets": "c_attn",
+        "model.lm_lora_r": 4,
+        "model.lm_grad_checkpointing": "false",
+        "objective.kind": "nextlatent",
+        "objective.horizons": "[1]",
+        "objective.lambda_sigreg": 0.0,
+        "run.steps": 1,
+        "run.batch_size": 2,
+        "run.out_dir": str(tmp_path),
+        "run.tensorboard": "false",
+    }
+    Trainer(load_config(DEBUG_CONFIG, [f"{k}={v}" for k, v in overrides.items()])).train()
+
+    model, max_len = finetune.build_model(tmp_path / "final.pt", features="last")
+    assert max_len == 24
+    assert isinstance(model.backbone.encoder, lm.LMEncoder)
+
+    trainable = {name for name, p in model.named_parameters() if p.requires_grad}
+    assert any("lora_" in name for name in trainable), "the adapters must train"
+    assert not any("code_emb" in name for name in trainable), "the code table must not"
+    assert all(
+        "lora_" in name
+        or name.startswith(("head.", "norm.", "backbone.encoder.proj", "backbone.encoder.norm"))
+        or name == "backbone.encoder.cls_token"
+        for name in trainable
+    ), sorted(trainable)
+
+    # Three rates, and the adapters get the lowest of them.
+    rates = {group["base_lr"] for group in finetune.param_groups(model)}
+    assert rates == {finetune.ENCODER_LR, finetune.HEAD_LR, finetune.LORA_LR}
+    lora_groups = [
+        group for group in finetune.param_groups(model) if group["base_lr"] == finetune.LORA_LR
+    ]
+    assert lora_groups and all(group["params"] for group in lora_groups)
+
+    # One step of the real loss: gradients reach the adapters and the head, and
+    # nothing reaches the frozen trunk.
+    logits = model(_batch(lengths=(8, 5)))
+    assert logits.shape == (2,)
+    torch.nn.functional.binary_cross_entropy_with_logits(
+        logits.float(), torch.tensor([1.0, 0.0])
+    ).backward()
+    grads = {name for name, p in model.named_parameters() if p.grad is not None}
+    assert "head.weight" in grads
+    assert any("lora_" in name for name in grads)
+    assert not any("base_layer" in name for name in grads)

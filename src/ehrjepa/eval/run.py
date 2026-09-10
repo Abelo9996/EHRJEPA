@@ -15,6 +15,11 @@ subset.
 
 A ``ckpt:`` model can be either pretraining objective: the checkpoint says which,
 and :func:`ehrjepa.eval.probe.load_encoder` builds the matching architecture.
+``ft:<path>`` scores the same checkpoint *fine-tuned end to end* on each task
+(:mod:`ehrjepa.eval.finetune`) rather than probed frozen, and ``ft_random`` is
+its train-from-scratch control; ``--ft-epochs`` and ``--ft-balanced`` are the
+only knobs. Both kinds write into the same ``predictions.parquet``, so a probe
+row and a fine-tune row are compared by the same paired bootstrap.
 ``--probe-features`` and ``--probe-layer`` choose how a frozen encoder is pooled.
 ``--probe-features`` defaults to ``auto``, which resolves *per checkpoint* --
 ``last`` for a causal encoder, ``mean`` for a bidirectional one -- and every
@@ -39,7 +44,7 @@ import numpy as np
 import polars as pl
 from scipy import sparse
 
-from ehrjepa.eval import baselines, probe, report, tasks
+from ehrjepa.eval import baselines, finetune, probe, report, tasks
 from ehrjepa.eval.history import HistoryReader
 from ehrjepa.eval.metrics import bootstrap_ci, paired_bootstrap
 
@@ -111,7 +116,7 @@ class ModelSpec:
     """One column of the results table."""
 
     name: str
-    kind: str  # "lr" | "gbm" | "probe"
+    kind: str  # "lr" | "gbm" | "probe" | "finetune"
     checkpoint: Path | None = None
     random_init: bool = False
     probe_features: str = "cls_mean"
@@ -152,13 +157,20 @@ def parse_models(
     probe_features: str = probe.AUTO_FEATURES,
     probe_layer: str = "final",
 ) -> list[ModelSpec]:
-    """``lr``, ``gbm``, ``random_init``, ``ckpt:<path>`` -> :class:`ModelSpec`.
+    """``lr``, ``gbm``, ``random_init``, ``ckpt:<path>``, ``ft:<path>`` -> :class:`ModelSpec`.
 
     ``probe_features="auto"`` (the default) resolves per checkpoint: ``last`` for
     a causal encoder, ``mean`` for a bidirectional one. That is a per-*model*
     decision rather than a per-run one, so a grid that mixes objectives can score
     every arm with the pooling that arm's architecture calls for, in one command,
     and the choice is recorded on each row rather than assumed.
+
+    ``ckpt:`` freezes the encoder and fits a linear probe on it; ``ft:`` trains
+    the same encoder end to end on the task (:mod:`ehrjepa.eval.finetune`) under
+    the same pooling. ``random_init`` and ``ft_random`` are their untrained
+    controls, and take the architecture from the first checkpoint in the list
+    unless they name one themselves (``ft_random:<path>``) -- so a grid can pass
+    the bare name and get the control for whatever cell it is scoring.
     """
     if probe_features != probe.AUTO_FEATURES and probe_features not in probe.PROBE_FEATURES:
         raise ValueError(f"unknown probe features {probe_features!r}")
@@ -179,22 +191,31 @@ def parse_models(
         return {"probe_features": features, "probe_layer": probe_layer}
 
     out: list[ModelSpec] = []
-    checkpoints = [s.split(":", 1)[1] for s in specs if s.startswith("ckpt:")]
+    checkpoints = [s.split(":", 1)[1] for s in specs if s.startswith(("ckpt:", "ft:"))]
+
+    def control(spec: str, name: str, kind: str) -> ModelSpec:
+        """``random_init``/``ft_random``, with or without an explicit checkpoint."""
+        named = spec.split(":", 1)[1] if ":" in spec else None
+        if named is None and not checkpoints:
+            raise ValueError(f"{name} needs a ckpt:/ft: model to copy its architecture from")
+        copied = Path(named or checkpoints[0])
+        return ModelSpec(name, kind, copied, random_init=True, **pooling(copied))
+
     for spec in specs:
         if spec == "lr":
             out.append(ModelSpec("lr", "lr"))
         elif spec == "gbm":
             out.append(ModelSpec("gbm", "gbm"))
-        elif spec == "random_init":
-            if not checkpoints:
-                raise ValueError("random_init needs a ckpt: model to copy its architecture from")
-            copied = Path(checkpoints[0])
-            out.append(
-                ModelSpec("random_init", "probe", copied, random_init=True, **pooling(copied))
-            )
+        elif spec == "random_init" or spec.startswith("random_init:"):
+            out.append(control(spec, "random_init", "probe"))
+        elif spec == "ft_random" or spec.startswith("ft_random:"):
+            out.append(control(spec, "ft_random", "finetune"))
         elif spec.startswith("ckpt:"):
             path = Path(spec.split(":", 1)[1])
             out.append(ModelSpec(f"ckpt:{path.parent.name}", "probe", path, **pooling(path)))
+        elif spec.startswith("ft:"):
+            path = Path(spec.split(":", 1)[1])
+            out.append(ModelSpec(f"ft:{path.parent.name}", "finetune", path, **pooling(path)))
         else:
             raise ValueError(f"unknown model spec {spec!r}")
     return out
@@ -250,6 +271,9 @@ def evaluate_task(
     device: str | None,
     few_shot: bool,
     predictions: list[pl.DataFrame] | None = None,
+    ft_epochs: int = finetune.MAX_EPOCHS,
+    ft_balanced: bool = False,
+    ft_batch: int = finetune.BATCH_SIZE,
 ) -> dict:
     """Fit and score every model on one task's shared anchor frame.
 
@@ -280,7 +304,32 @@ def evaluate_task(
     reader_counts = HistoryReader(cache_dir, max_len=None)
     for spec in models:
         started = time.time()
-        if spec.kind in ("lr", "gbm"):
+        record: dict
+        if spec.kind == "finetune":
+            # No feature matrix and no cache: the encoder is trained on this
+            # task's own train anchors and predicts the evaluation split
+            # directly. The record is keyed like a fitted probe's, with the
+            # per-epoch tuning curve where a probe puts its ``C`` grid.
+            tuned = finetune.fine_tune(
+                spec.checkpoint,
+                cache_dir,
+                anchors,
+                index,
+                y,
+                eval_split=eval_split,
+                random_init=spec.random_init,
+                features=spec.probe_features,
+                layer=spec.probe_layer,
+                max_epochs=ft_epochs,
+                balanced=ft_balanced,
+                batch_size=ft_batch,
+                device=device,
+                seed=seed,
+                name=spec.name,
+            )
+            p = tuned.scores
+            record = {"kind": spec.kind, **tuned.record()}
+        elif spec.kind in ("lr", "gbm"):
             if counts is None:
                 cache = (
                     baselines.cache_path(feature_cache, source, task_name)
@@ -332,7 +381,15 @@ def evaluate_task(
             fit = probe.fit_probe(x_tr, y_tr, x_tu, y_tu, seed=seed, name=spec.name)
             dense_for_few_shot = (x_tr, x_tu, x_ev)
 
-        p = fit.predict_proba(x_ev)
+        if spec.kind != "finetune":
+            p = fit.predict_proba(x_ev)
+            record = {
+                "kind": spec.kind,
+                "params": fit.params,
+                "grid": fit.grid,
+                "tuning_auroc": fit.tuning_auroc,
+                "n_features": int(x_tr.shape[1]),
+            }
         scores[spec.name] = p
         predictions.append(
             anchors[index[eval_split]]
@@ -346,15 +403,8 @@ def evaluate_task(
                 score=pl.Series(np.asarray(p, dtype=np.float64)),
             )
         )
-        record = {
-            "kind": spec.kind,
-            "params": fit.params,
-            "grid": fit.grid,
-            "tuning_auroc": fit.tuning_auroc,
-            "n_features": int(x_tr.shape[1]),
-            "fit_seconds": round(time.time() - started, 2),
-            "metrics": bootstrap_ci(y_ev, p, n_boot=n_boot, seed=seed),
-        }
+        record["fit_seconds"] = round(time.time() - started, 2)
+        record["metrics"] = bootstrap_ci(y_ev, p, n_boot=n_boot, seed=seed)
         if few_shot and spec.kind in ("lr", "probe"):
             if dense_for_few_shot is None:
                 fs_tr, fs_tu, fs_ev = x_tr, x_tu, x_ev
@@ -408,6 +458,9 @@ def run(
     limit: int | None = None,
     eval_subject_limit: int | None = None,
     eval_subject_seed: int = 0,
+    ft_epochs: int = finetune.MAX_EPOCHS,
+    ft_balanced: bool = False,
+    ft_batch: int = finetune.BATCH_SIZE,
 ) -> dict:
     """Build any missing task frames, then evaluate every model on every task."""
     started = time.time()
@@ -444,6 +497,16 @@ def run(
         "skipped": dict(skipped),
         "tasks": {},
     }
+    if any(spec.kind == "finetune" for spec in models):
+        results["finetune"] = {
+            "max_epochs": ft_epochs,
+            "patience": finetune.PATIENCE,
+            "balanced": bool(ft_balanced),
+            "batch_size": ft_batch,
+            "encoder_lr": finetune.ENCODER_LR,
+            "head_lr": finetune.HEAD_LR,
+            "lora_lr": finetune.LORA_LR,
+        }
     reader = HistoryReader(cache_dir, max_len=None)
     predictions: list[pl.DataFrame] = []
     for spec in supported:
@@ -472,6 +535,9 @@ def run(
             device=device,
             few_shot=few_shot,
             predictions=predictions,
+            ft_epochs=ft_epochs,
+            ft_balanced=ft_balanced,
+            ft_batch=ft_batch,
         )
         results["tasks"][spec.name]["dropped_not_in_cache"] = before - anchors.height
     results["runtime_seconds"] = round(time.time() - started, 1)
@@ -515,6 +581,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bidirectional one -- and the choice is recorded on every row",
     )
     parser.add_argument(
+        "--ft-epochs",
+        type=int,
+        default=finetune.MAX_EPOCHS,
+        help="maximum passes over the train anchors for a 'ft:' model; early "
+        f"stopping on tuning AUROC (patience {finetune.PATIENCE}) may end it sooner",
+    )
+    parser.add_argument(
+        "--ft-batch",
+        type=int,
+        default=finetune.BATCH_SIZE,
+        help="windows per fine-tuning step; lower it for a 'ft:' model whose "
+        "encoder is a pretrained language model and will not hold 64 windows",
+    )
+    parser.add_argument(
+        "--ft-balanced",
+        action="store_true",
+        help="draw each fine-tuning epoch class-balanced with replacement "
+        "instead of at the task's own prevalence",
+    )
+    parser.add_argument(
         "--probe-layer",
         default="final",
         choices=list(probe.PROBE_LAYERS),
@@ -542,6 +628,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         limit=args.limit,
         eval_subject_limit=args.eval_subject_limit,
         eval_subject_seed=args.eval_subject_seed,
+        ft_epochs=args.ft_epochs,
+        ft_balanced=args.ft_balanced,
+        ft_batch=args.ft_batch,
     )
     print(f"wrote {Path(args.out) / 'results.md'} in {results['runtime_seconds']}s")
     return 0

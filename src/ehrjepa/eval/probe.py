@@ -71,6 +71,7 @@ __all__ = [
     "fit_probe",
     "load_encoder",
     "n_features",
+    "pool",
 ]
 
 log = logging.getLogger(__name__)
@@ -214,11 +215,24 @@ def embed(
         )
         cls = encoded.cls if layer == "final" else encoded.cls_penultimate
         hidden = encoded.tokens if layer == "final" else encoded.tokens_penultimate
-        rows = torch.cat(_pool(hidden, cls, batch["attention_mask"], features), dim=-1)
+        rows = pool(hidden, cls, batch["attention_mask"], features)
         out[start:stop] = rows.float().cpu().numpy()
         if start and start % (batch_size * 50) == 0:
             log.info("embedded %d/%d", start, anchors.height)
     return out
+
+
+def pool(
+    hidden: torch.Tensor, cls: torch.Tensor, attention_mask: torch.Tensor, features: str
+) -> torch.Tensor:
+    """One pooled row per window, ``(B, n_features(dim, features))``.
+
+    The single place the pooling rule lives, so a frozen probe and an
+    end-to-end fine-tune (:mod:`ehrjepa.eval.finetune`) read the encoder the
+    same way and a difference between them is the training, not the readout.
+    Differentiable: nothing here detaches.
+    """
+    return torch.cat(_pool(hidden, cls, attention_mask, features), dim=-1)
 
 
 def _pool(
