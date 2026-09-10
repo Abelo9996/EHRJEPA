@@ -112,10 +112,11 @@ class LatentObjective(nn.Module):
         config: ObjectiveConfig,
         recon_head: nn.Module | None = None,
         value_head: nn.Module | None = None,
+        recon_value_head: nn.Module | None = None,
     ) -> None:
         super().__init__()
         self.config = config
-        self._heads = [recon_head, value_head]
+        self._heads = [recon_head, value_head, recon_value_head]
         self.sigreg = SIGReg(
             n_directions=config.sigreg_directions,
             max_rows=config.sigreg_max_rows,
@@ -159,11 +160,19 @@ class LatentObjective(nn.Module):
             if hidden is None or codes is None:
                 return zero, {}
             stats = ar_loss_chunked(head, hidden, codes, chunk=self.config.ar_chunk)
-            return stats["loss"], {
-                "ce": stats["ce"],
-                "top1": stats["top1"],
-                "top10": stats["top10"],
-            }
+            extra = {"ce": stats["ce"], "top1": stats["top1"], "top10": stats["top10"]}
+            loss = stats["loss"]
+            bins = output.extras.get("recon_value_bin")
+            bin_head = self._heads[2]
+            if bin_head is not None and bins is not None:
+                # Added *inside* the ``lambda_recon``-weighted term, so
+                # ``recon_value`` costs the same in a hybrid cell as the code
+                # term it sits beside -- the arrangement
+                # :class:`~ehrjepa.objectives.loss.JEPAObjective` already uses.
+                recon_value = F.cross_entropy(bin_head(hidden).float(), bins)
+                loss = loss + recon_value
+                extra["recon_value_loss"] = recon_value.detach()
+            return loss, extra
         codes = output.extras.get("window_codes")
         if codes is None:
             return zero, {}
@@ -206,7 +215,7 @@ class LatentObjective(nn.Module):
             "sigreg_tokens": sig_tokens.detach(),
             "sigreg_cls": sig_cls.detach(),
             "recon_loss": recon.detach(),
-            "recon_value_loss": zero,
+            "recon_value_loss": zero,  # overwritten by ``extra`` when the head exists
             **{name: value.detach() for name, value in extra.items()},
         }
         losses.update(_anchor_diagnostics(output))

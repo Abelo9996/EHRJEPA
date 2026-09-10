@@ -1,0 +1,235 @@
+# A2 on PhysioNet/CinC 2019 (sepsis): does latent prediction earn its keep on
+# continuous ICU state? Pre-registered in docs/experiments/A2_PLAN.md and in
+# docs/experiments/a2-physionet2019/README.md, both written before any cell ran.
+# This file is the mechanism, not the rationale.
+#
+# The question, in one sentence: every pure latent-prediction variant this
+# repository has measured loses to next-code AR on DE-SynPUF, where an event is
+# a discrete low-entropy code and the hybrid's lead appears only with the code
+# loss present. PhysioNet-2019 is the opposite regime -- 43 codes, 99% of events
+# numeric, the *number* is the record -- and the objectives that predict a
+# representation rather than a token are the ones that should benefit.
+#
+# Base config: configs/pretrain_default.yaml (6L/256d causal encoder,
+# max_len 512, batch 64, the hybrid knobs chosen in
+# docs/experiments/ABLATION_RESULTS.md). 100,000,000 nominal token slots per
+# cell = 3,052 optimizer steps at 64 x 512; the train split is 9.78M events, so
+# a cell sees roughly ten epochs' worth of windows.
+#
+# Six objectives, two seeds each. Every cell is causal, so `probe_features:
+# auto` resolves to `last@final` throughout.
+#
+#   ar_bins       objective.kind: ar with objective.recon_value: true -- next
+#                 code through the tied table, plus an 11-way head on the next
+#                 event's decile at the same weight. This is the control the
+#                 decision rule is written against.
+#   ar_cont       the same code term with objective.lambda_value: 1.0 in place
+#                 of the decile head: a Huber regression on the next event's
+#                 per-code z-score. "Does predicting the number rather than the
+#                 bin help a token model?"
+#   hybrid_bins   the shipped hybrid: nextlatent, horizons [1, 4, 16],
+#                 lambda_recon 0.1, recon_value true, no SIGReg, EMA target.
+#   latent_cont   the latent term plus the continuous value term and *no code
+#                 loss*. This is the cell the pre-registered question turns on.
+#   latent_only   the latent term alone. No code loss, no value term, no SIGReg
+#                 -- the same lambda_sigreg: 0 every other cell here runs, so
+#                 the comparison is not confounded by an anti-collapse term only
+#                 one arm gets. `effective_rank`, `mean_std` and `cos_gap` in
+#                 metrics.csv are the collapse evidence.
+#   hybrid_bins_lm  hybrid_bins with model.encoder: lm -- a frozen
+#                 Qwen2.5-0.5B with LoRA r=8 on q,k,v,o reading each event as
+#                 "heart rate 92 (+1h)". See the sizing note below.
+#
+# Sizing the LM cell. Measured on this repository's M4 (16 GB, MPS, bf16):
+# 4 x 256-event windows through Qwen2.5-0.5B + LoRA with gradient checkpointing
+# ran at LM_TOKENS_PER_S event slots/s -- see docs/experiments/a2-physionet2019/README.md
+# for the command and the table. Scaling that to the RTX 4060 (8 GB) and holding
+# the cell to about six hours gives the budget below, which is far short of the
+# 100M the from-scratch cells get: this row answers "what does a pretrained
+# encoder add", not "does it win at matched compute", and its README says so.
+# `data.max_len: 192` keeps a window inside `model.lm_max_tokens: 2048` at the
+# measured ~9.6 tokens per event, so `lm_events_kept` should log 1.0 and no
+# window is truncated; `run.batch_size: 2` with `optim.accum_steps: 8` is the
+# 8 GB fit (effective batch 16, an eighth of the activation memory) -- the M4
+# measurement below peaked at 11.6 GB of MPS driver allocation at batch 4 x 256
+# events, and halving both the batch and the window is what brings that under an
+# 8 GB card with the model and the optimizer state resident. `steps_for`
+# multiplies by accum_steps so the budget lands on the right number of optimizer
+# steps rather than eight times it. `optim.warmup_steps: 50` replaces the base's
+# 100: this cell's whole run is a few hundred optimizer steps and 100 would be a
+# fifth of it.
+# `model.target_mode: shared` is not a choice between equals: an EMA copy of a
+# 0.5B teacher is another gigabyte resident and another gigabyte in every
+# checkpoint, for a trunk bit-identical to the student's, and EHRJEPAConfig
+# rejects it -- see ehrjepa.models.jepa.EHRJEPAConfig._check_lm.
+#
+# `eval_subject_limit: null` scores all 4,006 held-out subjects. No earlier run
+# on this source shares that cohort with a stored `predictions.parquet` at the
+# same probe settings, so `reuse_predictions` is unset and scripts/ablate.py
+# fits `lr`/`gbm` fresh, once, riding along on whichever cell's eval runs first.
+# docs/experiments/2026-09-10-eval-physionet2019/ has the reference numbers
+# those should reproduce.
+#
+# Every seed-1 cell is listed before any seed-2 cell, so an interrupted or
+# `--only` restricted run finishes one seed's worth first.
+
+name: a2-physionet2019
+base: configs/pretrain_default.yaml
+source: physionet2019
+budget_tokens: 100000000
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One untrained control per distinct encoder architecture. `ar` and
+# `nextlatent` share a 6L/256d causal encoder and differ only in their heads and
+# their loss, but `random_init` rebuilds the checkpoint's own class -- and an
+# untrained EHRAR and an untrained EHRNextLatent are not the same module -- so
+# each objective family gets one. The LM cell is a third architecture outright:
+# its untrained control is a *pretrained* Qwen trunk with untrained adapters and
+# projection, which is the right control for "what does the LoRA training add"
+# and is stated as such in the README.
+control_runs: [ar_bins_s1, hybrid_bins_s1, hybrid_bins_lm_s1]
+
+runs:
+  # ----------------------------------------------------------------- seed 1
+  - name: ar_bins_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      objective.recon_value: true
+
+  - name: ar_cont_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      objective.lambda_value: 1.0
+
+  - name: hybrid_bins_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_cont_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 1.0
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_only_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 0.0
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_bins_lm_s1
+    budget_tokens: 1500000
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.encoder: lm
+      model.lm_name: Qwen/Qwen2.5-0.5B
+      model.lm_max_tokens: 2048
+      model.target_mode: shared
+      data.max_len: 192
+      run.batch_size: 2
+      optim.accum_steps: 8
+      optim.warmup_steps: 50
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  # ----------------------------------------------------------------- seed 2
+  - name: ar_bins_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      objective.recon_value: true
+
+  - name: ar_cont_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      objective.lambda_value: 1.0
+
+  - name: hybrid_bins_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_cont_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 1.0
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_only_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 0.0
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_bins_lm_s2
+    budget_tokens: 1500000
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.encoder: lm
+      model.lm_name: Qwen/Qwen2.5-0.5B
+      model.lm_max_tokens: 2048
+      model.target_mode: shared
+      data.max_len: 192
+      run.batch_size: 2
+      optim.accum_steps: 8
+      optim.warmup_steps: 50
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0

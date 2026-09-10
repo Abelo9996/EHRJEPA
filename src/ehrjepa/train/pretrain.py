@@ -196,6 +196,7 @@ class Trainer:
                 chunk=config.objective.ar_chunk,
                 lambda_value=config.objective.lambda_value,
                 value_head=self.model.value_head,
+                recon_value_head=self.model.recon_value_head,
             ).to(self.device)
         elif self.kind in LATENT_KINDS:
             if not self.model_config.causal:
@@ -212,6 +213,7 @@ class Trainer:
                 config.objective,
                 recon_head=self.model.recon_head,
                 value_head=self.model.value_head,
+                recon_value_head=self.model.recon_value_head,
             ).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
@@ -499,6 +501,8 @@ class Trainer:
                     self._writer.add_scalar(f"train/{name}", value, self.step)
         if self.kind == "ar":
             body = "ce {ce:.4f} top1 {top1:.3f} top10 {top10:.3f}"
+            if self.config.objective.recon_value:
+                body += " recon_val {recon_value_loss:.4f}"
             if self.config.objective.lambda_value != 0.0:
                 body += " val {value_loss:.4f}"
         else:

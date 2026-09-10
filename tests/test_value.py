@@ -232,6 +232,82 @@ def test_the_value_term_falls_on_a_memorizable_batch_under_ar() -> None:
     assert last < 0.5 * first, f"value_loss went {first:.4f} -> {last:.4f}"
 
 
+# --------------------------------------------------------------------------- #
+# The decile head beside the code term, per objective
+
+
+def test_recon_value_builds_a_bin_head_for_ar_and_for_nextlatent() -> None:
+    """The grid's `ar_bins` and `hybrid_bins` cells need it on both objectives.
+
+    Before this, ``objective.recon_value`` was read only by ``kind: jepa``: the
+    head was built for a hybrid cell and never called, and for an ``ar`` cell it
+    was not built at all. Both now predict the *next* event's decile off the same
+    hidden row whose code the softmax predicts.
+    """
+    from ehrjepa.train.config import from_mapping
+
+    def resolve(**objective) -> EHRJEPAConfig:
+        raw = {"model": {"dim": DIM, "causal": True}, "objective": objective}
+        return from_mapping(raw).model_config(VOCAB)
+
+    assert resolve(kind="ar", recon_value=True).recon_value_head
+    assert resolve(kind="nextlatent", lambda_recon=0.1, recon_value=True).recon_value_head
+    # No code term to sit beside means no bin head for the latent objectives.
+    assert not resolve(kind="nextlatent", lambda_recon=0.0, recon_value=True).recon_value_head
+    assert not resolve(kind="ar").recon_value_head
+
+
+def test_the_ar_bin_term_scores_the_next_events_decile() -> None:
+    torch.manual_seed(0)
+    model = EHRAR(_config(causal=True, value_head=False, recon_value_head=True))
+    objective = ARObjective(recon_value_head=model.recon_value_head)
+    batch = _batch(seed=3)
+    out = model(batch)
+    stats = objective(model.head, out.hidden, out.targets, value_bin=out.value_bin)
+    expected = torch.nn.functional.cross_entropy(
+        model.recon_value_head(out.hidden).float(), out.value_bin
+    )
+    assert torch.allclose(stats["recon_value_loss"], expected.detach(), atol=0.0)
+    assert torch.allclose(stats["loss"], stats["ce"] + expected, atol=1e-6)
+
+
+def test_the_nextlatent_bin_term_rides_inside_the_recon_weight() -> None:
+    torch.manual_seed(0)
+    config = ObjectiveConfig(kind="nextlatent", horizons=[1], lambda_recon=0.1, lambda_sigreg=0.0)
+    model = EHRNextLatent(
+        _config(
+            causal=True,
+            build_predictor=False,
+            horizons=[1],
+            value_head=False,
+            recon_head=True,
+            recon_value_head=True,
+        )
+    )
+    objective = LatentObjective(
+        config,
+        recon_head=model.recon_head,
+        recon_value_head=model.recon_value_head,
+    )
+    batch = _batch(seed=4)
+    out = model(batch, compute_targets=False)
+    # The bins are the next event's, at the positions the code term scores.
+    shifted = torch.zeros_like(batch["value_bin"])
+    shifted[:, :-1] = batch["value_bin"][:, 1:]
+    scored = out.extras["recon_value_bin"]
+    assert scored.numel() == out.extras["recon_code_id"].numel()
+    assert set(scored.tolist()) <= set(shifted.reshape(-1).tolist())
+    losses = objective(out)
+    assert float(losses["recon_value_loss"]) > 0.0
+    # ``recon_loss`` is the code term *plus* the bin term, and the total weights
+    # the pair by ``lambda_recon`` -- the bin head does not get a weight of its
+    # own, which is the whole point of putting it inside.
+    assert float(losses["recon_loss"]) > float(losses["recon_value_loss"])
+    assert float(losses["loss"]) == pytest.approx(
+        float(losses["pred_loss"]) + 0.1 * float(losses["recon_loss"]), abs=1e-6
+    )
+
+
 def test_no_head_is_built_and_no_term_is_added_at_the_default_weight() -> None:
     """The shipped default is off, and off means "absent", not "weighted zero"."""
     assert ObjectiveConfig().lambda_value == 0.0

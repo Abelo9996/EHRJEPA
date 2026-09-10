@@ -1,0 +1,196 @@
+# A2 on PhysioNet/CinC 2012 (in-hospital mortality): the second source of the
+# same pre-registered test. Design, protocol and decision rule are
+# docs/experiments/A2_PLAN.md and docs/experiments/a2-physionet2012/README.md,
+# both written before any cell ran; this file is the mechanism.
+#
+# Identical to configs/grids/a2_physionet2019.yaml -- same base config, same six
+# objectives, same two seeds, same eval protocol -- with two differences, both
+# properties of the data rather than choices:
+#
+#   * 40,000,000 nominal token slots per cell instead of 100M = 1,221 optimizer
+#     steps at 64 x 512. The train split is 4.27M events against 2019's 9.78M,
+#     so the smaller budget keeps the events-per-parameter ratio of the two
+#     grids roughly comparable rather than running ten times over the same
+#     4.27M events.
+#   * `source: physionet2012`, whose tasks are `mortality_inhospital/24h` and
+#     `/48h` (anchors at ICU hour 24 and 48, outcome parked at hour 49 by the
+#     ETL). `tasks: all` selects them: `ehrjepa.eval.tasks` declares each ICU
+#     task's `families`, so the 2019 sepsis tasks are not defined here and the
+#     claims tasks are defined on neither.
+#
+# 1,156 held-out subjects, all of them (`eval_subject_limit: null`). Reference
+# `lr`/`gbm` numbers: docs/experiments/2026-09-10-eval-physionet2012/.
+#
+# The `hybrid_bins_lm` cell's budget, batch, accumulation and token cap are the
+# 2019 grid's, unchanged, and the throughput measurement and 8 GB arithmetic
+# behind them are in that file's header and in
+# docs/experiments/a2-physionet2019/README.md. It is deliberately *not* scaled
+# down alongside the from-scratch cells: it is already so far below matched
+# compute that a further cut would leave nothing to read, and the row is not a
+# matched-compute comparison in either grid.
+#
+# The one thing to read across the two grids rather than within them: 2012 is
+# half the events and a quarter of the stays of 2019, so a difference that
+# appears on 2019 and not here is as likely to be power as regime, and the
+# READMEs say which comparisons the two seeds actually support.
+
+name: a2-physionet2012
+base: configs/pretrain_default.yaml
+source: physionet2012
+budget_tokens: 40000000
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+# One untrained control per distinct encoder architecture. `ar` and
+# `nextlatent` share a 6L/256d causal encoder and differ only in their heads and
+# their loss, but `random_init` rebuilds the checkpoint's own class -- and an
+# untrained EHRAR and an untrained EHRNextLatent are not the same module -- so
+# each objective family gets one. The LM cell is a third architecture outright:
+# its untrained control is a *pretrained* Qwen trunk with untrained adapters and
+# projection, which is the right control for "what does the LoRA training add"
+# and is stated as such in the README.
+control_runs: [ar_bins_s1, hybrid_bins_s1, hybrid_bins_lm_s1]
+
+runs:
+  # ----------------------------------------------------------------- seed 1
+  - name: ar_bins_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      objective.recon_value: true
+
+  - name: ar_cont_s1
+    overrides:
+      run.seed: 1
+      objective.kind: ar
+      model.causal: true
+      objective.lambda_value: 1.0
+
+  - name: hybrid_bins_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_cont_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 1.0
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_only_s1
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 0.0
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_bins_lm_s1
+    budget_tokens: 1500000
+    overrides:
+      run.seed: 1
+      objective.kind: nextlatent
+      model.causal: true
+      model.encoder: lm
+      model.lm_name: Qwen/Qwen2.5-0.5B
+      model.lm_max_tokens: 2048
+      model.target_mode: shared
+      data.max_len: 192
+      run.batch_size: 2
+      optim.accum_steps: 8
+      optim.warmup_steps: 50
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  # ----------------------------------------------------------------- seed 2
+  - name: ar_bins_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      objective.recon_value: true
+
+  - name: ar_cont_s2
+    overrides:
+      run.seed: 2
+      objective.kind: ar
+      model.causal: true
+      objective.lambda_value: 1.0
+
+  - name: hybrid_bins_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_cont_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 1.0
+      objective.lambda_sigreg: 0.0
+
+  - name: latent_only_s2
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.0
+      objective.lambda_value: 0.0
+      objective.lambda_sigreg: 0.0
+
+  - name: hybrid_bins_lm_s2
+    budget_tokens: 1500000
+    overrides:
+      run.seed: 2
+      objective.kind: nextlatent
+      model.causal: true
+      model.encoder: lm
+      model.lm_name: Qwen/Qwen2.5-0.5B
+      model.lm_max_tokens: 2048
+      model.target_mode: shared
+      data.max_len: 192
+      run.batch_size: 2
+      optim.accum_steps: 8
+      optim.warmup_steps: 50
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.recon_value: true
+      objective.lambda_sigreg: 0.0

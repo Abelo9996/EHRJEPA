@@ -209,6 +209,13 @@ class EHRNextLatent(_CausalLatent):
             scored = code_targets != PAD_ID
             extras["recon_hidden"] = hidden[scored]
             extras["recon_code_id"] = code_targets[scored]
+            if self.recon_value_head is not None:
+                # The decile of the same next event, off the same hidden row:
+                # ``lambda_recon`` here *is* the AR loss, so ``recon_value`` here
+                # is the AR bin term.
+                shifted = torch.zeros_like(batch["value_bin"])
+                shifted[:, :-1] = batch["value_bin"][:, 1:]
+                extras["recon_value_bin"] = shifted[scored]
         if self.value_head is not None:
             extras["value_target_z"] = _cat_index(value_z, hidden).float()
             extras["value_target_bin"] = _cat_index(value_bin, hidden)

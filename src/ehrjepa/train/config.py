@@ -164,7 +164,14 @@ class PretrainConfig:
         values["target_span_only"] = self.target.span_only
         values["time_feature_dropout"] = self.train.time_feature_dropout
         values["recon_head"] = self.objective.lambda_recon != 0.0
-        values["recon_value_head"] = values["recon_head"] and self.objective.recon_value
+        # ``recon_value`` adds the 11-way ``value_bin`` head beside whichever code
+        # term the objective already has. For ``jepa`` and the latent objectives
+        # that term is ``lambda_recon``, so the bin head is only meaningful when
+        # it is on; for ``ar`` the code term *is* the objective and the bin head
+        # needs no other switch.
+        values["recon_value_head"] = self.objective.recon_value and (
+            values["recon_head"] or self.objective.kind == "ar"
+        )
         values["value_head"] = self.objective.lambda_value != 0.0
         # ``model.encoder: lm`` serialises events to text, so the cache whose
         # ``vocab.parquet`` and ``quantizer.parquet`` supply the words and the

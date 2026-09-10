@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from ehrjepa.data.tokenize import PAD_ID
+from ehrjepa.data.tokenize import N_VALUE_BINS, PAD_ID
 from ehrjepa.models.jepa import EHRJEPAConfig, build_event_stack, effective_valid
 from ehrjepa.models.pretrained import load_encoder_weights
 from ehrjepa.objectives.ar import NextCodeHead, next_code_targets
@@ -70,8 +70,11 @@ class EHRAR(nn.Module):
             config.vocab_size,
             tied_weight=self.embed.code_emb.weight if config.tie_embeddings else None,
         )
-        # After the head, and only when ``objective.lambda_value`` asks for it, so
-        # the RNG stream of every existing AR run is untouched.
+        # After the head, and only when the objective asks for them, so the RNG
+        # stream of every existing AR run is untouched.
+        self.recon_value_head: nn.Module | None = None
+        if config.recon_value_head:
+            self.recon_value_head = nn.Linear(config.dim, N_VALUE_BINS + 1)
         self.value_head: nn.Module | None = None
         if config.value_head:
             self.value_head = nn.Linear(config.dim, 1)
