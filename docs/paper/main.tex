@@ -1087,35 +1087,45 @@ tasks: \code{mortality\_365d}, \code{new\_dx\_365d/copd} and
 \code{readmission\_30d}. On \code{copd} the sign is in \code{ar}'s favour.
 
 \subsection{Few-shot}
+\label{sec:fewshot}
 
-Table~\ref{tab:fewshot} scores the same six checkpoints from grid~5, plus
-\code{lr}, at $k = 32$ and $k = 128$ ($k$ positives and $k$ negatives) as well
-as the full split. Averaged across the seven tasks: \code{lr} 0.6111 / 0.6407 /
-0.6949; \code{ar} 0.6491 / 0.6802 / 0.7234; hybrid 0.6518 / 0.6835 / 0.7279.
-The \code{ar} and hybrid $\pm$ values are the spread over three \emph{training}
-seeds of each checkpoint's own mean over five few-shot-sample seeds; \code{lr}'s
-is the spread over its five few-shot seeds directly, since it has one model and
-no training-seed axis. \code{lr}'s $\pm$ reads 0.0000 at three decimal places
-throughout.
+Table~\ref{tab:fewshot} scores the six 1B checkpoints of
+Section~\ref{sec:final1b} (\code{ar} and \code{hybrid\_final}, seeds 0--2
+each), plus \code{lr}, at $k = 32$ and $k = 128$ ($k$ positives and $k$
+negatives) as well as the full split, on the same \textbf{full held-out
+split (11{,}708 subjects)} as Section~\ref{sec:final1b} --- superseding an
+earlier few-shot run on the 48M-token pilot checkpoints and the
+3{,}000-subject held-out subset
+(\code{docs/experiments/2026-09-04-fewshot-desynpuf/}, dropped from this
+paper; its numbers are unchanged in the repository for reference).
+Averaged across the seven tasks: \code{lr} 0.6147 / 0.6391 / 0.6972;
+\code{ar} 0.6131 / 0.6597 / 0.7239; \code{hybrid\_final} 0.6412 / 0.6872 /
+0.7397. The \code{ar} and \code{hybrid\_final} $\pm$ values are the spread
+over three \emph{training} seeds of each checkpoint's own mean over five
+few-shot-sample seeds; \code{lr}'s is the spread over its five few-shot
+seeds directly, since it has one model and no training-seed axis --- on this
+full split \code{lr}'s $\pm$ is not negligible, up to $\pm0.0691$ at
+$k{=}32$ on \code{new\_dx\_365d/copd}.
 
 \begin{table}[t]
 \centering\small
-\caption{Few-shot held-out AUROC. \code{gbm} is omitted: it has no few-shot fits
-in the current evaluation path (Section~\ref{sec:eval}); its full-split numbers
-are in Table~\ref{tab:master}.}
+\caption{Few-shot held-out AUROC, full held-out split (11{,}708 subjects),
+1B-token checkpoints. \code{gbm} is omitted: it has no few-shot fits in the
+current evaluation path (Section~\ref{sec:eval}); its full-split numbers are
+in Table~\ref{tab:final1bbaselines}.}
 \label{tab:fewshot}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccc}
 \toprule
 task & \code{lr} $k{=}32$ & \code{lr} $k{=}128$ & \code{ar} $k{=}32$ & \code{ar} $k{=}128$ & hyb.\ $k{=}32$ & hyb.\ $k{=}128$ \\
 \midrule
-\code{inpatient\_365d}              & 0.5912 & 0.6575 & $0.6707 \pm 0.0015$ & $0.7058 \pm 0.0045$ & $0.6591 \pm 0.0012$ & $0.6976 \pm 0.0023$ \\
-\code{mortality\_365d}              & 0.5265 & 0.5332 & $0.5510 \pm 0.0019$ & $0.5668 \pm 0.0071$ & $0.5636 \pm 0.0028$ & $0.5942 \pm 0.0037$ \\
-\code{new\_dx\_365d/ckd}            & 0.6320 & 0.6701 & $0.6739 \pm 0.0017$ & $0.7134 \pm 0.0048$ & $0.6758 \pm 0.0020$ & $0.7035 \pm 0.0036$ \\
-\code{new\_dx\_365d/copd}           & 0.6281 & 0.6666 & $0.6840 \pm 0.0042$ & $0.7176 \pm 0.0011$ & $0.6696 \pm 0.0031$ & $0.7036 \pm 0.0025$ \\
-\code{new\_dx\_365d/diabetes}       & 0.6838 & 0.7031 & $0.6940 \pm 0.0051$ & $0.7356 \pm 0.0018$ & $0.6967 \pm 0.0021$ & $0.7324 \pm 0.0040$ \\
-\code{new\_dx\_365d/heart\_failure} & 0.6483 & 0.6663 & $0.6934 \pm 0.0056$ & $0.7227 \pm 0.0050$ & $0.6876 \pm 0.0017$ & $0.7042 \pm 0.0026$ \\
-\code{readmission\_30d}             & 0.5680 & 0.5880 & $0.5766 \pm 0.0078$ & $0.5994 \pm 0.0062$ & $0.6100 \pm 0.0037$ & $0.6487 \pm 0.0009$ \\
+\code{inpatient\_365d}              & $0.5979 \pm 0.0390$ & $0.6613 \pm 0.0061$ & $0.6128 \pm 0.0040$ & $0.6772 \pm 0.0039$ & $0.6404 \pm 0.0048$ & $0.6959 \pm 0.0018$ \\
+\code{mortality\_365d}              & $0.5295 \pm 0.0313$ & $0.5078 \pm 0.0381$ & $0.5369 \pm 0.0046$ & $0.5541 \pm 0.0036$ & $0.5414 \pm 0.0031$ & $0.5650 \pm 0.0032$ \\
+\code{new\_dx\_365d/ckd}            & $0.6402 \pm 0.0569$ & $0.6795 \pm 0.0024$ & $0.6364 \pm 0.0027$ & $0.7056 \pm 0.0045$ & $0.6607 \pm 0.0026$ & $0.7307 \pm 0.0021$ \\
+\code{new\_dx\_365d/copd}           & $0.6294 \pm 0.0691$ & $0.6722 \pm 0.0051$ & $0.6391 \pm 0.0068$ & $0.6976 \pm 0.0047$ & $0.6685 \pm 0.0030$ & $0.7192 \pm 0.0010$ \\
+\code{new\_dx\_365d/diabetes}       & $0.6794 \pm 0.0183$ & $0.7007 \pm 0.0018$ & $0.6503 \pm 0.0046$ & $0.7049 \pm 0.0022$ & $0.6796 \pm 0.0018$ & $0.7289 \pm 0.0017$ \\
+\code{new\_dx\_365d/heart\_failure} & $0.6588 \pm 0.0213$ & $0.6721 \pm 0.0066$ & $0.6488 \pm 0.0043$ & $0.6957 \pm 0.0039$ & $0.6816 \pm 0.0021$ & $0.7232 \pm 0.0017$ \\
+\code{readmission\_30d}             & $0.5680 \pm 0.0284$ & $0.5799 \pm 0.0222$ & $0.5675 \pm 0.0147$ & $0.5827 \pm 0.0093$ & $0.6160 \pm 0.0064$ & $0.6477 \pm 0.0035$ \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -1123,19 +1133,20 @@ task & \code{lr} $k{=}32$ & \code{lr} $k{=}128$ & \code{ar} $k{=}32$ & \code{ar}
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{fewshot_desynpuf.png}
-\caption{Held-out AUROC against few-shot training size, one panel per task, one
-line per model family.}
+\caption{Held-out AUROC against few-shot training size, full held-out split,
+one panel per task, one line per model family.}
 \label{fig:fewshot}
 \end{figure}
 
-Both encoder families are above \code{lr} at every $k$ on every task. The hybrid
-is above \code{ar} at both few-shot sizes on \code{mortality\_365d},
-\code{readmission\_30d} and (at $k{=}32$) \code{ckd} and \code{diabetes};
-\code{ar} is above the hybrid at both sizes on \code{inpatient\_365d},
-\code{copd} and \code{heart\_failure}. On \code{readmission\_30d} at $k{=}128$
-the hybrid reads 0.6487 against \code{ar}'s 0.5994. A few-shot run on the
-final 1B checkpoints (\code{ar} and \code{hybrid\_final}, Section~\ref{sec:final1b})
-is in progress; no result is reported yet.
+\code{hybrid\_final} is above \code{ar} and above \code{lr} at both $k{=}32$
+and $k{=}128$ on every one of the seven tasks. \code{lr} is below both
+encoder families at $k{=}128$ on every task; at $k{=}32$ \code{lr} is above
+\code{ar} on four of seven tasks --- \code{new\_dx\_365d/ckd} (0.6402 vs.\
+0.6364), \code{new\_dx\_365d/diabetes} (0.6794 vs.\ 0.6503),
+\code{new\_dx\_365d/heart\_failure} (0.6588 vs.\ 0.6488) and
+\code{readmission\_30d} (0.5680 vs.\ 0.5675) --- while remaining below
+\code{hybrid\_final} on all seven. The largest \code{hybrid\_final}-over-\code{ar}
+gap is on \code{readmission\_30d} at $k{=}128$ (0.6477 vs.\ 0.5827, $+0.0650$).
 
 \subsection{Scaling to 200M and 1B tokens}
 \label{sec:scale}
@@ -1654,10 +1665,11 @@ where \code{ar} degrades monotonically with token budget --- 0.6946, 0.6674,
 0.6853 (3-seed mean) --- producing a 2.16-point gap at 1B, the largest of any
 task, and the only task at 1B whose three-seed \code{ar} and hybrid ranges do
 not overlap by any margin: \code{ar}'s worst seed (0.6742) is still below the
-hybrid's worst seed (0.6840). And it is the task with the largest few-shot
-separation: at $k{=}128$ the hybrid reads 0.6487 against \code{ar}'s 0.5994,
-and at 48M with three seeds the hybrid-over-\code{ar} gap (0.6969 vs 0.6824)
-exceeds both families' seed ranges. Readmission is also the only task
+hybrid's worst seed (0.6840). And on the 1B checkpoints, full held-out split
+(Table~\ref{tab:fewshot}), it is the task with the largest few-shot
+separation: at $k{=}128$ \code{hybrid\_final} reads 0.6477 against
+\code{ar}'s 0.5827, a 0.0650 gap, the largest of any task/$k$ cell in that
+table. Readmission is also the only task
 anchored on a \emph{specific event type} (an inpatient discharge) rather than
 on a hash-drawn time, and the only one with a 30-day rather than a 365-day
 horizon. A short horizon anchored on a discharge is the task most plausibly
@@ -1729,15 +1741,18 @@ left for future work.
 \label{sec:limitations}
 
 \begin{enumerate}[leftmargin=*,itemsep=3pt,topsep=3pt]
-\item \textbf{Every DE-SynPUF number before Section~\ref{sec:final1b}'s table
+\item \textbf{Most DE-SynPUF numbers before Section~\ref{sec:final1b}'s table
       used the 3{,}000-subject held-out subset, not the full split.} Table
-      \ref{tab:master}, \ref{tab:seeds}, \ref{tab:fewshot},
+      \ref{tab:master}, \ref{tab:seeds},
       \ref{tab:scale}--\ref{tab:ablate4} are all on that subset.
-      Section~\ref{sec:final1b}'s full-held-out-split (11{,}708-subject)
-      comparison of \code{ar} against the repository default supersedes the
-      subset numbers for the cells it covers; it does not exist for every
-      cell in the earlier tables (only \code{ar}, the SIGReg-on hybrid and
-      \code{hybrid\_final} at 1B tokens were re-scored on the full split).
+      Table~\ref{tab:fewshot} (Section~\ref{sec:fewshot}) is the exception:
+      it is scored on the full split, using the same six 1B checkpoints as
+      Section~\ref{sec:final1b}. Section~\ref{sec:final1b}'s full-held-out-split
+      (11{,}708-subject) comparison of \code{ar} against the repository
+      default supersedes the subset numbers for the cells it covers; it does
+      not exist for every cell in the earlier tables (only \code{ar}, the
+      SIGReg-on hybrid and \code{hybrid\_final} at 1B tokens were re-scored
+      on the full split).
 \item \textbf{Single seed at 200M; three seeds at 1B for two of four
       objectives.} The 1B \code{ar} and hybrid cells have three seeds each
       (Section~\ref{sec:seeds1b}); every 200M cell (\code{ar}, hybrid,
@@ -1800,8 +1815,6 @@ ablation and scale grids through the final 1B default on the full held-out
 split (Section~\ref{sec:final1b}).
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
-\item A few-shot run on the final 1B checkpoints (\code{ar} and
-      \code{hybrid\_final}) is in progress.
 \item Pretrain and evaluate on the full MIMIC-IV v3.1 extract, where laboratory
       values exist and the value path is actually exercised.
 \item Evaluate against the EHRSHOT task suite and MEDS-DEV, so that numbers
@@ -1946,6 +1959,7 @@ commit & date & result \\
 \code{a57c91a} & 2026-09-08 & ablation grid 4: no-SIGReg hybrid with a frozen AR teacher \\
 \code{5353d33} & 2026-09-08 & final-default 1B grid: full-held-out re-scoring of earlier 1B checkpoints \\
 \code{7134ec3} & 2026-09-10 & final-default 1B grid, complete: \code{hybrid\_final} at seeds 0--2 \\
+\code{44fcab4} & 2026-09-10 & few-shot evaluation of the six final 1B checkpoints, full held-out split \\
 \bottomrule
 \end{tabular}
 \end{table}

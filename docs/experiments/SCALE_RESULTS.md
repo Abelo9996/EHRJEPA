@@ -85,6 +85,28 @@ SIGReg is worth about +0.6 on its own.
 `hybrid_final` is above `gbm` (0.7511) and `lr` (0.7191) on the mean-of-6, and
 above `ar` on every non-mortality task with non-overlapping seed ranges.
 
+## Few-shot at 1B (full held-out)
+
+Source: [`fewshot-1b-final-desynpuf/README.md`](fewshot-1b-final-desynpuf/README.md)
+and [`results.md`](fewshot-1b-final-desynpuf/results.md). Same six 1B
+checkpoints and full 11,708-subject held-out split as the section above,
+scored at few-shot training sizes `k=32`, `k=128`, `k=512`, and the full
+split ("all"). `ar`/`hybrid_final` cells are the mean over 3 training seeds
+of each checkpoint's own mean over 5 few-shot-sample seeds; `lr`'s is the
+spread over its 5 few-shot seeds directly. `gbm` has no few-shot fits — only
+its ordinary full-data point at `k=all`.
+
+Family mean over the six non-mortality tasks:
+
+| family | k=32 | k=128 | k=512 | k=all |
+|---|---|---|---|---|
+| `lr` | 0.6289 | 0.6610 | 0.6807 | 0.7191 |
+| `ar` | 0.6258 | 0.6773 | 0.7127 | 0.7436 |
+| `hybrid_final` | 0.6578 | 0.7076 | 0.7393 | 0.7628 |
+| `gbm` | -- | -- | -- | 0.7511 |
+
+`k=all` reproduces the "Final 1B comparison" mean-of-6 table above exactly.
+
 ## Historical: 3,000-subject-subset results
 
 Every table from here down is on the earlier seeded 3,000-subject held-out

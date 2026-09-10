@@ -128,6 +128,12 @@ Per-task seed ranges (min-max across 3 seeds) do not overlap between `ar` and
 prior variant of the hybrid with SIGReg on (`lambda_sigreg: 0.05`) scores
 0.762 mean-of-6 on the same full split — between `ar` and the final default.
 
+- Few-shot AUROC on the same 1B checkpoints and full held-out split (family
+  mean over the 6 non-mortality tasks): at k=32, `lr` 0.6289, `ar` 0.6258,
+  `hybrid_final` 0.6578; at k=128, `lr` 0.6610, `ar` 0.6773, `hybrid_final`
+  0.7076. Full table and protocol in
+  [`docs/experiments/fewshot-1b-final-desynpuf/`](docs/experiments/fewshot-1b-final-desynpuf/).
+
 **Scaling** (from
 [`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md),
 3,000-subject-subset numbers at 48M/200M, historical):
