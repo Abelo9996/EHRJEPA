@@ -205,6 +205,17 @@ class Grid:
     #: interrupted mid-run can resume instead of restarting from step zero.
     ckpt_every: int = 2000
 
+    def train_cache_dir(self) -> str:
+        """The tokenizer cache the grid's cells train on.
+
+        Derived from ``source`` so that training and evaluation always see the
+        same data. Before this existed a grid could name ``source:
+        physionet2019`` for evaluation while every cell silently pretrained on
+        the base config's ``data.cache_dir`` (DE-SynPUF); the a2 grids did
+        exactly that on 2026-09-10 and their first rows had to be discarded.
+        """
+        return f"data/cache/{self.source}"
+
     @property
     def doc_dir(self) -> Path:
         return REPO / self.docs_root / self.name
@@ -602,6 +613,7 @@ def train_one(grid: Grid, entry: Mapping[str, Any], log: Log, force: bool = Fals
             f"run.seed={grid.seed}",
             f"run.out_dir={out_dir}",
             f"run.ckpt_every={grid.ckpt_every}",
+            f"data.cache_dir={grid.train_cache_dir()}",
             *resume_args,
             *overrides,
         ],

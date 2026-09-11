@@ -851,3 +851,18 @@ def test_a_cell_may_override_the_finetuning_batch(tmp_path: Path) -> None:
         ablate.load_grid(
             _grid_file(tmp_path, runs=[{"name": "x", "ft_epochs": 2}]),
         )
+
+
+def test_training_cache_follows_the_grid_source(tmp_path, monkeypatch):
+    """A cell must pretrain on the same source it is evaluated on."""
+    import scripts.ablate as ab
+
+    grid = ab.load_grid("configs/grids/a2_physionet2019.yaml")
+    assert grid.train_cache_dir() == "data/cache/physionet2019"
+    seen: list[list[str]] = []
+    monkeypatch.setattr(ab, "_spawn", lambda cmd, log: seen.append([str(c) for c in cmd]))
+    monkeypatch.setattr(ab, "_final_metrics", lambda out_dir: {"loss": 0.0})
+    entry = ab.plan(grid)[0]
+    entry = dict(entry, out_dir=str(tmp_path / "cell"))
+    ab.train_one(grid, entry, ab.Log(tmp_path / "log.txt"))
+    assert any(a == "data.cache_dir=data/cache/physionet2019" for a in seen[0])
