@@ -891,7 +891,7 @@ def _row(
         "overrides": dict(entry["overrides"]),
         "final": {k: v for k, v in final.items() if isinstance(v, float)},
         "auroc": auroc,
-        "finished": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "finished": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
 
 
@@ -911,7 +911,7 @@ def _write_summary(grid: Grid, payload: dict) -> None:
     payload["grid"] = grid.name
     payload["base"] = str(grid.base)
     payload["source"] = grid.source
-    payload["updated"] = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    payload["updated"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     payload["eval"] = {
         "bootstrap": grid.bootstrap,
         "eval_subject_limit": grid.eval_subject_limit,

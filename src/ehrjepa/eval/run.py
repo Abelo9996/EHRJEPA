@@ -484,7 +484,7 @@ def run(
         "n_boot": n_boot,
         "seed": seed,
         "commit": _git_commit(),
-        "created": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "models": {
             spec.name: {
                 "kind": spec.kind,

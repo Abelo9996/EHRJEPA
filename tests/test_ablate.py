@@ -855,7 +855,7 @@ def test_a_cell_may_override_the_finetuning_batch(tmp_path: Path) -> None:
 
 def test_training_cache_follows_the_grid_source(tmp_path, monkeypatch):
     """A cell must pretrain on the same source it is evaluated on."""
-    import scripts.ablate as ab
+    ab = ablate
 
     grid = ab.load_grid("configs/grids/a2_physionet2019.yaml")
     assert grid.train_cache_dir() == "data/cache/physionet2019"
