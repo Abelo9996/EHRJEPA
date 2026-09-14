@@ -99,7 +99,7 @@ control_models: [random_init]
 # its untrained control is a *pretrained* Qwen trunk with untrained adapters and
 # projection, which is the right control for "what does the LoRA training add"
 # and is stated as such in the README.
-control_runs: [ar_bins_s1, hybrid_bins_s1, hybrid_bins_lm_s1]
+control_runs: [ar_bins_s1, hybrid_bins_s1]
 
 runs:
   # ----------------------------------------------------------------- seed 1
@@ -150,27 +150,6 @@ runs:
       objective.lambda_value: 0.0
       objective.lambda_sigreg: 0.0
 
-  - name: hybrid_bins_lm_s1
-    eval_subject_limit: 5000
-    budget_tokens: 1000000
-    overrides:
-      run.seed: 1
-      objective.kind: nextlatent
-      model.causal: true
-      model.encoder: lm
-      model.lm_name: Qwen/Qwen2.5-0.5B
-      model.lm_max_tokens: 2048
-      model.target_mode: shared
-      data.max_len: 160
-      run.batch_size: 2
-      optim.accum_steps: 8
-      optim.warmup_steps: 50
-      objective.horizons: [1, 4, 16]
-      objective.lambda_recon: 0.1
-      objective.recon_value: true
-      objective.lambda_sigreg: 0.0
-
-  # ----------------------------------------------------------------- seed 2
   - name: ar_bins_s2
     overrides:
       run.seed: 2
@@ -216,24 +195,4 @@ runs:
       objective.horizons: [1, 4, 16]
       objective.lambda_recon: 0.0
       objective.lambda_value: 0.0
-      objective.lambda_sigreg: 0.0
-
-  - name: hybrid_bins_lm_s2
-    eval_subject_limit: 5000
-    budget_tokens: 1000000
-    overrides:
-      run.seed: 2
-      objective.kind: nextlatent
-      model.causal: true
-      model.encoder: lm
-      model.lm_name: Qwen/Qwen2.5-0.5B
-      model.lm_max_tokens: 2048
-      model.target_mode: shared
-      data.max_len: 160
-      run.batch_size: 2
-      optim.accum_steps: 8
-      optim.warmup_steps: 50
-      objective.horizons: [1, 4, 16]
-      objective.lambda_recon: 0.1
-      objective.recon_value: true
       objective.lambda_sigreg: 0.0

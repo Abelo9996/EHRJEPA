@@ -263,3 +263,5 @@ A cell interrupted mid-run resumes from its own `latest.pt`; a cell already in
 `summary.json` is skipped. `--only ar_bins_s1,hybrid_bins_s1` runs a subset.
 
 **LM cells evaluated on a subset.** `hybrid_bins_lm_s1`/`_s2` carry `eval_subject_limit: 5000` (seeded): the 0.5B encoder embeds anchors at ~200/min on the RTX 4060, so the full held-out split would take about a day per cell. Their rows are therefore on a 5,000-subject held-out subset and are not directly comparable in CI width to the full-split rows; every other cell is on the full split.
+
+**LM cells removed from this grid (2026-09-14).** The frozen-probe evaluation of a 0.5B encoder must embed every training anchor to fit the probe, which runs about a day per cell on the RTX 4060 regardless of any held-out cap. The language-model encoder is evaluated only in the fine-tuning grids (a2ft-*), where the training set is bounded by epochs.

@@ -871,6 +871,8 @@ def test_training_cache_follows_the_grid_source(tmp_path, monkeypatch):
 def test_a_cell_may_cap_its_own_evaluation_subjects():
     """The LM cells evaluate on a seeded subset; every other cell keeps the grid default."""
     grid = ablate.load_grid("configs/grids/a2_physionet2019.yaml")
+    raw = dict(name="x", overrides={}, eval_subject_limit=5000)
+    run = ablate.GridRun(**raw)
+    assert run.eval_subject_limit == 5000
     by_name = {e["run"]: e for e in ablate.plan(grid)}
-    assert by_name["hybrid_bins_lm_s1"]["eval_subject_limit"] == 5000
     assert by_name["ar_bins_s1"]["eval_subject_limit"] == grid.eval_subject_limit
