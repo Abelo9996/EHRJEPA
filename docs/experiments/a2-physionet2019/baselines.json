@@ -1,0 +1,18 @@
+{
+  "gbm": {
+    "sepsis_6h": 0.836335276246415,
+    "sepsis_stay": 0.7692608291645981
+  },
+  "lr": {
+    "sepsis_6h": 0.7852394880540781,
+    "sepsis_stay": 0.7681432262827611
+  },
+  "random_init@ar_bins_s1": {
+    "sepsis_6h": 0.6861476183296845,
+    "sepsis_stay": 0.6269077532108807
+  },
+  "random_init@hybrid_bins_s1": {
+    "sepsis_6h": 0.6861476183296845,
+    "sepsis_stay": 0.6269077532108807
+  }
+}

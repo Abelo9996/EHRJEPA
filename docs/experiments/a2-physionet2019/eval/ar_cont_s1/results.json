@@ -1,0 +1,190 @@
+{
+  "source": "physionet2019",
+  "meds_dir": "data/meds/physionet2019",
+  "cache_dir": "data/cache/physionet2019",
+  "task_dir": "data/tasks/physionet2019",
+  "eval_split": "held_out",
+  "anchor_seed": 20260903,
+  "eval_subject_limit": null,
+  "eval_subject_seed": 0,
+  "n_boot": 200,
+  "seed": 0,
+  "commit": "89bdf94",
+  "created": "2026-09-11T02:38:01+00:00",
+  "models": {
+    "ckpt:ar_cont_s1": {
+      "kind": "probe",
+      "checkpoint": "/home/gaming_pc/EHRJEPA/runs/a2-physionet2019/ar_cont_s1/final.pt",
+      "features": "last@final",
+      "random_init": false
+    }
+  },
+  "skipped": {
+    "mortality_365d": "death",
+    "inpatient_365d": "inpatient_admission",
+    "readmission_30d": "inpatient_admission",
+    "new_dx_365d/diabetes": "dx_diabetes",
+    "new_dx_365d/heart_failure": "dx_heart_failure",
+    "new_dx_365d/ckd": "dx_ckd",
+    "new_dx_365d/copd": "dx_copd",
+    "mortality_inhospital/24h": "not defined on source family 'physionet2019'",
+    "mortality_inhospital/48h": "not defined on source family 'physionet2019'"
+  },
+  "tasks": {
+    "sepsis_6h": {
+      "counts": {
+        "train": 251991,
+        "tuning": 32181,
+        "held_out": 31324
+      },
+      "prevalence": {
+        "train": 0.015270386640792727,
+        "tuning": 0.013796960939684907,
+        "held_out": 0.017111480015323713
+      },
+      "models": {
+        "ckpt:ar_cont_s1": {
+          "kind": "probe",
+          "params": {
+            "C": 0.03
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.7852728662115183
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.7884523974773526
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.7904163143198024
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.7896480349335061
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.7889293963592102
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.7887248009896654
+            }
+          ],
+          "tuning_auroc": 0.7904163143198024,
+          "n_features": 256,
+          "fit_seconds": 518.63,
+          "metrics": {
+            "auroc": {
+              "point": 0.8185009872522537,
+              "lo": 0.799307511848561,
+              "hi": 0.8346520280788249,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.07572574119893109,
+              "lo": 0.06471561227874217,
+              "hi": 0.09069459707951784,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.016354319927712458,
+              "lo": 0.015023772918404541,
+              "hi": 0.017726469537549937,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.0441862468497394,
+              "lo": 0.9715692670825915,
+              "hi": 1.1182458426843895,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "sepsis_stay": {
+      "counts": {
+        "train": 31134,
+        "tuning": 3992,
+        "held_out": 3869
+      },
+      "prevalence": {
+        "train": 0.05579109655039507,
+        "tuning": 0.05686372745490982,
+        "held_out": 0.05556991470664254
+      },
+      "models": {
+        "ckpt:ar_cont_s1": {
+          "kind": "probe",
+          "params": {
+            "C": 0.01
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.7477859487161486
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.7513207083560033
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.749986836793794
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.7464544172794871
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.7430436842936625
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.7411587131649613
+            }
+          ],
+          "tuning_auroc": 0.7513207083560033,
+          "n_features": 256,
+          "fit_seconds": 27.72,
+          "metrics": {
+            "auroc": {
+              "point": 0.7486806430671706,
+              "lo": 0.7154729957568002,
+              "hi": 0.7826041845157911,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.1732171089536888,
+              "lo": 0.1432421528451544,
+              "hi": 0.21803521788587418,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.04943363813257196,
+              "lo": 0.043714454642919516,
+              "hi": 0.054437235667182164,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.061298596621993,
+              "lo": 0.9102472688129198,
+              "hi": 1.2141619127439962,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    }
+  },
+  "runtime_seconds": 549.8
+}
