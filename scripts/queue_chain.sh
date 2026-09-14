@@ -16,5 +16,5 @@ if systemctl is-active --quiet "$unit"; then echo "unit $unit already active"; e
 chown -R "$owner" "runs/$name"; touch "$log"
 systemd-run --unit="$unit" --collect -p WorkingDirectory="$repo" \
   -p StandardOutput="append:$log" -p StandardError="append:$log" \
-  /bin/bash -lc "while pgrep -f 'bin/python3? scripts/ablate.py' >/dev/null || pgrep -f 'queue_after.sh' >/dev/null; do sleep 120; done; scripts/launch_grid.sh '$grid' '$name'"
+  /bin/bash -lc "while pgrep -f 'bin/python3? scripts/ablate[.]py' >/dev/null || pgrep -f 'queue_after[.]sh' >/dev/null; do sleep 120; done; scripts/launch_grid.sh '$grid' '$name'"
 sleep 2; systemctl is-active "$unit" && echo "chained '$name' after all running/queued grids; log: runs/$name/queue.log"
