@@ -261,3 +261,5 @@ tail -f runs/a2-physionet2019/ablate.log
 
 A cell interrupted mid-run resumes from its own `latest.pt`; a cell already in
 `summary.json` is skipped. `--only ar_bins_s1,hybrid_bins_s1` runs a subset.
+
+**LM cells evaluated on a subset.** `hybrid_bins_lm_s1`/`_s2` carry `eval_subject_limit: 5000` (seeded): the 0.5B encoder embeds anchors at ~200/min on the RTX 4060, so the full held-out split would take about a day per cell. Their rows are therefore on a 5,000-subject held-out subset and are not directly comparable in CI width to the full-split rows; every other cell is on the full split.

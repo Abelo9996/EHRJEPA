@@ -110,6 +110,7 @@ runs:
       objective.lambda_sigreg: 0.0
 
   - name: hybrid_bins_lm_s1
+    eval_subject_limit: 5000
     budget_tokens: 1000000
     overrides:
       run.seed: 1
@@ -177,6 +178,7 @@ runs:
       objective.lambda_sigreg: 0.0
 
   - name: hybrid_bins_lm_s2
+    eval_subject_limit: 5000
     budget_tokens: 1000000
     overrides:
       run.seed: 2

@@ -89,3 +89,5 @@ python scripts/ablate.py configs/grids/a2_physionet2012.yaml --dry-run
 nohup python scripts/ablate.py configs/grids/a2_physionet2012.yaml &
 tail -f runs/a2-physionet2012/ablate.log
 ```
+
+**LM cells evaluated on a subset.** `hybrid_bins_lm_s1`/`_s2` carry `eval_subject_limit: 5000` (seeded): the 0.5B encoder embeds anchors at ~200/min on the RTX 4060, so the full held-out split would take about a day per cell. Their rows are therefore on a 5,000-subject held-out subset and are not directly comparable in CI width to the full-split rows; every other cell is on the full split.

@@ -114,6 +114,7 @@ SUMMARY_COLUMNS: tuple[tuple[str, str], ...] = (
     # LM encoder does not hold 64 windows), and a fine-tuned AUROC that was
     # produced at a different batch has to say so.
     ("ft_batch", "ft_bs"),
+    ("eval_subject_limit", "eval_subj"),
     ("target_mode", "target"),
     ("lambda_sigreg", "lambda"),
     ("p_future", "p_future"),
@@ -150,6 +151,13 @@ class GridRun:
     #: does, and the alternative is shrinking every cell's batch to fit the
     #: largest model in the grid.
     ft_batch: int | None = None
+    #: Cap the held-out subjects this cell is evaluated on (seeded, like the
+    #: grid-level ``eval_subject_limit``). For cells whose evaluation is far
+    #: more expensive than the rest -- a 0.5B language-model encoder embedding
+    #: 315k anchors on an 8 GB card runs ~25 h -- a subset keeps the grid
+    #: finishing while every cheaper cell stays on the full split. Recorded on
+    #: the row so the reader can see it.
+    eval_subject_limit: int | None = None
 
     def override_strings(self) -> list[str]:
         return [f"{key}={_scalar(value)}" for key, value in self.overrides.items()]
@@ -286,6 +294,7 @@ def load_grid(path: str | Path) -> Grid:
             "budget_tokens",
             "reuse_checkpoint",
             "ft_batch",
+            "eval_subject_limit",
         }
         if extra:
             raise ValueError(f"run {item['name']!r} has unknown keys: {sorted(extra)}")
@@ -303,6 +312,9 @@ def load_grid(path: str | Path) -> Grid:
                 budget_tokens=int(item.get("budget_tokens", default_budget)),
                 reuse_checkpoint=str(reuse) if reuse else None,
                 ft_batch=int(item["ft_batch"]) if item.get("ft_batch") else None,
+                eval_subject_limit=(
+                    int(item["eval_subject_limit"]) if item.get("eval_subject_limit") else None
+                ),
             )
         )
     fields = {
@@ -377,6 +389,7 @@ def plan(grid: Grid) -> list[dict]:
             eval_dir=str(grid.doc_dir / "eval" / item.name),
             eval_models=eval_models(grid, Path(entry["checkpoint"]), controls),
             ft_batch=item.ft_batch or grid.ft_batch,
+            eval_subject_limit=item.eval_subject_limit or grid.eval_subject_limit,
             done=item.name in done,
         )
         out.append(entry)
@@ -715,10 +728,10 @@ def eval_one(
         "--probe-layer",
         grid.probe_layer,
     ]
-    if grid.eval_subject_limit:
+    if entry.get("eval_subject_limit"):
         command += [
             "--eval-subject-limit",
-            str(grid.eval_subject_limit),
+            str(entry["eval_subject_limit"]),
             "--eval-subject-seed",
             str(grid.eval_subject_seed),
         ]
