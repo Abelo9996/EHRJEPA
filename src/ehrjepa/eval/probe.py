@@ -194,6 +194,12 @@ def embed(
     )
     dev = _device(device)
     model = model.to(dev)
+    if getattr(model.config, "encoder", None) == "lm":
+        # A 0.5B language model over 160-event windows does not fit 64 windows
+        # per forward on an 8 GB card; the a2 LM cell thrashed the CUDA
+        # allocator for hours at the default. Small batches are cheap here
+        # because the LM forward dominates anyway.
+        batch_size = min(batch_size, 8)
     reader = HistoryReader(cache_dir, max_len=max_len)
 
     minutes = anchor_minutes(anchors["anchor_time"])
