@@ -102,7 +102,7 @@ control_models: [random_init]
 # untrained adapters and projection, fine-tuned on the task, which is the
 # control for "what did the a2 LoRA pretraining add" and not for "what did
 # Qwen's pretraining add".
-control_runs: [ar_bins_s1, hybrid_bins_lm_s1]
+control_runs: [ar_bins_s1]
 
 runs:
   - name: ar_bins_s1
@@ -128,6 +128,3 @@ runs:
   # matters for this cell is unaffected; the comparison to the from-scratch
   # cells now differs in batch as well as in budget, which is one more reason
   # this row is not a matched-compute row.
-  - name: hybrid_bins_lm_s1
-    ft_batch: 4
-    reuse_checkpoint: runs/a2-physionet2019/hybrid_bins_lm_s1/final.pt

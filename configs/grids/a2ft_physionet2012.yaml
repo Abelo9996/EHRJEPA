@@ -50,7 +50,7 @@ ft_balanced: false
 reuse_predictions: null
 reuse_models: [lr, gbm]
 control_models: [random_init]
-control_runs: [ar_bins_s1, hybrid_bins_lm_s1]
+control_runs: [ar_bins_s1]
 
 runs:
   - name: ar_bins_s1
@@ -76,6 +76,3 @@ runs:
   # matters for this cell is unaffected; the comparison to the from-scratch
   # cells now differs in batch as well as in budget, which is one more reason
   # this row is not a matched-compute row.
-  - name: hybrid_bins_lm_s1
-    ft_batch: 4
-    reuse_checkpoint: runs/a2-physionet2012/hybrid_bins_lm_s1/final.pt

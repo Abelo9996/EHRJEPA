@@ -165,3 +165,5 @@ python -m ehrjepa.eval.run --source physionet2019 --tasks all \
   --ft-epochs 5 --bootstrap 200 --no-few-shot \
   --out docs/experiments/a2ft-physionet2019/eval/ar_bins_s1/
 ```
+
+**LM cell removed (2026-09-15).** Fine-tuning the Qwen2.5-0.5B encoder on the sepsis task made no logged progress in 14 h on the RTX 4060 (the first forward over all training anchors alone exceeds the budget); the pretrained-LM-encoder question is deferred to hardware that can hold it.

@@ -81,3 +81,5 @@ tail -f runs/a2ft-physionet2012/ablate.log
 Rows land in `summary.md`/`summary.json` in this directory as each cell
 finishes, one row per cell with `mode = finetune`; a cell already in
 `summary.json` is skipped and `--only ar_bins_s1` runs a subset.
+
+**LM cell removed (2026-09-15).** Fine-tuning the Qwen2.5-0.5B encoder on the sepsis task made no logged progress in 14 h on the RTX 4060 (the first forward over all training anchors alone exceeds the budget); the pretrained-LM-encoder question is deferred to hardware that can hold it.
