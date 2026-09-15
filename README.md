@@ -134,6 +134,53 @@ prior variant of the hybrid with SIGReg on (`lambda_sigreg: 0.05`) scores
   0.7076. Full table and protocol in
   [`docs/experiments/fewshot-1b-final-desynpuf/`](docs/experiments/fewshot-1b-final-desynpuf/).
 
+**Continuous ICU state** — the pre-registered test of
+[`docs/experiments/A2_PLAN.md`](docs/experiments/A2_PLAN.md), results in
+[`docs/experiments/A2_RESULTS.md`](docs/experiments/A2_RESULTS.md)
+(PhysioNet/CinC 2019 and 2012 converted to MEDS, full held-out splits, 200
+bootstrap resamples; frozen probes at 2 seeds, 100M/40M nominal token slots
+per cell; end-to-end fine-tuning of the seed-1 checkpoints, up to 5 epochs
+with early stopping):
+
+- Frozen probe, 2-seed mean AUROC on `sepsis_6h` / `sepsis_stay` /
+  `mortality_inhospital/24h` / `mortality_inhospital/48h`: `gbm` 0.836 /
+  0.769 / 0.829 / 0.859; `lr` 0.785 / 0.768 / 0.789 / 0.828; `ar_bins` 0.818 /
+  0.756 / 0.763 / 0.801; `ar_cont` 0.821 / 0.749 / 0.773 / 0.813;
+  `hybrid_bins` 0.828 / 0.766 / 0.766 / 0.785; `latent_cont` 0.779 / 0.696 /
+  0.718 / 0.758; `latent_only` 0.624 / 0.593 / 0.655 / 0.706; `random_init`
+  0.686 / 0.627 / 0.648 / 0.703.
+- Fine-tuned, seed-1 checkpoints, same four tasks: `ar_bins` 0.826 / 0.786 /
+  0.800 / 0.836; `hybrid_bins` 0.840 / 0.773 / 0.797 / 0.830; `latent_cont`
+  0.810 / 0.752 / 0.770 / 0.810; `latent_only` 0.727 / 0.618 / 0.644 / 0.660;
+  from-scratch control `ft_random` 0.744 / 0.636 / 0.654 / 0.684.
+- The two objectives with the code loss removed (`latent_cont`,
+  `latent_only`) are below `ar_bins` on all four tasks, at both probe seeds
+  and under fine-tuning. `latent_only` is 6.2 and 3.4 points below
+  `random_init` on the two 2019 tasks and within 0.7 of it on the two 2012
+  tasks under the probe, and 1.0-2.5 points below `ft_random` under
+  fine-tuning on all four.
+- `hybrid_bins` minus `ar_bins`: +1.0 / +0.9 / +0.3 / -1.6 points under the
+  probe (2-seed spread on these cells 0.0002-0.0226), +1.4 / -1.4 / -0.3 /
+  -0.5 fine-tuned. Fine-tuned `hybrid_bins` on `sepsis_6h` (0.840) is the only
+  cell in either fine-tuning grid above `gbm` (0.836) on that task.
+- Fine-tuning adds +0.7 to +5.6 points over the probe for `ar_bins`,
+  `hybrid_bins` and `latent_cont`, and +6.6 to +15.1 points over `ft_random`;
+  `latent_only` is -2.5 to -1.0 against `ft_random`.
+- `gbm` is ahead of every trained cell on all four tasks under the probe, and
+  on both 2012 tasks under fine-tuning.
+- Decision-rule verdict: the latent objectives without a code loss do not beat
+  binned AR on any of these tasks, so the JEPA framing is **not supported**;
+  the claim is limited to the hybrid as a regularizer riding on a
+  code-prediction loss.
+- Objective (6) of the plan (Qwen2.5-0.5B + LoRA over serialized events) was
+  dropped from all four grids on compute grounds (~1 day/cell to embed ~315k
+  training anchors for a frozen probe; no epoch in 14 h under fine-tuning), so
+  the pretrained-encoder question is untested.
+- The first pass of the probe grids (2026-09-10) was invalid — every cell was
+  trained on DE-SynPUF and evaluated on ICU data; fixed in commit `89bdf94`,
+  and those numbers were never committed. Probe grids recorded in `1491da1`,
+  fine-tuning grids in `e68e4b5`.
+
 **Scaling** (from
 [`docs/experiments/SCALE_RESULTS.md`](docs/experiments/SCALE_RESULTS.md),
 3,000-subject-subset numbers at 48M/200M, historical):

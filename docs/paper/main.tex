@@ -63,7 +63,9 @@ evaluated under matched compute with untrained controls}
 \textbf{Status: work in progress.} This document reports the state of an ongoing
 project. Every number in it comes from a run recorded in the project
 repository at a named commit. All pretraining is on a single synthetic,
-claims-derived source (CMS DE-SynPUF) with no laboratory values; no
+claims-derived source (CMS DE-SynPUF) with no laboratory values --- except
+the pre-registered continuous-state test of Section~\ref{sec:a2results},
+which pretrains on two open PhysioNet ICU sources; no
 experiment on MIMIC-IV or EHRSHOT has been run. The largest token budget
 reported (1B) now has three training seeds per cell for \code{ar} and the
 hybrid, re-scored on the full 11{,}708-subject held-out split; the 200M
@@ -133,7 +135,17 @@ high-entropy targets, rather than riding on a code-prediction loss over
 discrete, low-entropy events, is untested here; a pre-registered comparison on
 two continuous hourly-ICU-state datasets, with a decision rule fixed before
 training, is specified in Section~\ref{sec:a2} and
-\code{docs/experiments/A2\_PLAN.md} and has not yet been run.
+\code{docs/experiments/A2\_PLAN.md}. That test has now been run on both
+sources, under frozen two-seed probes and under end-to-end fine-tuning: the
+two latent objectives with the code loss removed lose to binned AR on all
+four tasks, on either source, at either seed and under either readout, so by
+the pre-registered decision rule the JEPA framing --- that predicting in
+representation space is itself the useful part --- is not supported, and what
+the evidence carries is the hybrid as a regularizer riding on a
+code-prediction loss, with a short-horizon signature: its one margin outside
+the seed spread is on the 6-hour-horizon sepsis task, where fine-tuned it
+reaches 0.840 against binned AR's 0.826 and is the only cell in either
+fine-tuning grid above \code{gbm} (0.836).
 \end{abstract}
 
 \vspace{2mm}
@@ -1780,9 +1792,186 @@ token prediction is not, on this evidence. If they do not, the paper's
 claim is limited to the hybrid as a regularizer riding on a code-prediction
 loss, and the JEPA framing --- that predicting in representation space is
 itself the useful part --- is not supported by anything measured in this
-paper. This test has not been run; the design above and this decision rule
-are also recorded verbatim in \code{docs/experiments/A2\_PLAN.md}, written
-before training.
+paper. The design above and this decision rule are also recorded verbatim in
+\code{docs/experiments/A2\_PLAN.md}, written before training;
+Section~\ref{sec:a2results} reports the outcome.
+
+\subsection{Results of the pre-registered test}
+\label{sec:a2results}
+
+The test specified above was run on both sources. Four grids:
+\code{docs/experiments/a2-physionet2019/} and \code{a2-physionet2012/}
+(frozen linear probes, five objectives, two training seeds each, commit
+\code{1491da1}), and \code{a2ft-physionet2019/} and \code{a2ft-physionet2012/}
+(the same objectives fine-tuned end to end from their seed-1 checkpoints, with
+a from-scratch control, commit \code{e68e4b5}). Every cell is trained on its
+own grid's source --- 100{,}007{,}936 nominal token slots per cell on the 2019
+source, 40{,}009{,}728 on the smaller 2012 source --- and scored on the FULL
+held-out split of that source with 200 bootstrap resamples, with \code{lr} and
+\code{gbm} refit on the same split. The fine-tuning grids train at most 5
+epochs with early stopping on tuning-split AUROC (patience 2, the best epoch's
+weights restored) and add \code{ft\_random}: the same architecture and
+schedule from random initialization, which is what a pretrained checkpoint has
+to beat to have contributed anything. Per-cell bootstrap intervals are in
+\code{eval/\textless cell\textgreater/results.json} in each grid directory and
+are consolidated, with the tables below, in
+\code{docs/experiments/A2\_RESULTS.md}.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\textwidth]{a2_physionet.png}
+\caption{The four panels of the pre-registered test, one per task. Solid bars
+are the frozen-probe two-seed mean with a min--max whisker across the two
+seeds; hatched bars are the end-to-end fine-tuned point on the seed-1
+checkpoint (a single seed, so no whisker). Dashed lines mark \code{gbm} and
+\code{lr} on that task's own held-out split. Rendered by
+\code{scripts/plot\_a2.py} from the committed \code{summary.md} tables.}
+\label{fig:a2}
+\end{figure}
+
+\begin{table}[h]
+\centering\small
+\caption{Frozen linear probe, held-out AUROC on the full held-out split of
+each source, two training seeds per cell (\code{\_s1}, \code{\_s2}).
+\code{random\_init} is the architecture- and pooling-matched untrained
+control; \code{gbm} and \code{lr} are the count-feature baselines refit on the
+same split. Sources: \code{docs/experiments/a2-physionet2019/summary.md},
+\code{a2-physionet2012/summary.md}.}
+\label{tab:a2probe}
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{\code{sepsis\_6h}} & \multicolumn{3}{c}{\code{sepsis\_stay}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+objective & s1 & s2 & mean & s1 & s2 & mean \\
+\midrule
+\code{ar\_bins} & 0.8207 & 0.8143 & \best{0.8175} & 0.7676 & 0.7450 & \best{0.7563} \\
+\code{ar\_cont} & 0.8185 & 0.8227 & \best{0.8206} & 0.7487 & 0.7495 & \best{0.7491} \\
+\code{hybrid\_bins} & 0.8224 & 0.8327 & \best{0.8276} & 0.7656 & 0.7658 & \best{0.7657} \\
+\code{latent\_cont} & 0.7751 & 0.7823 & \best{0.7787} & 0.6828 & 0.7088 & \best{0.6958} \\
+\code{latent\_only} & 0.6240 & 0.6246 & \best{0.6243} & 0.5796 & 0.6066 & \best{0.5931} \\
+\midrule
+\code{random\_init} & & & 0.6861 & & & 0.6269 \\
+\code{gbm} & & & 0.8363 & & & 0.7693 \\
+\code{lr} & & & 0.7852 & & & 0.7681 \\
+\bottomrule
+\end{tabular}
+
+\vspace{6pt}
+
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{\code{mortality\_inhospital/24h}} & \multicolumn{3}{c}{\code{mortality\_inhospital/48h}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+objective & s1 & s2 & mean & s1 & s2 & mean \\
+\midrule
+\code{ar\_bins} & 0.7669 & 0.7595 & \best{0.7632} & 0.8083 & 0.7941 & \best{0.8012} \\
+\code{ar\_cont} & 0.7768 & 0.7682 & \best{0.7725} & 0.8140 & 0.8129 & \best{0.8134} \\
+\code{hybrid\_bins} & 0.7631 & 0.7689 & \best{0.7660} & 0.7813 & 0.7883 & \best{0.7848} \\
+\code{latent\_cont} & 0.6994 & 0.7365 & \best{0.7180} & 0.7375 & 0.7777 & \best{0.7576} \\
+\code{latent\_only} & 0.6597 & 0.6498 & \best{0.6547} & 0.7022 & 0.7096 & \best{0.7059} \\
+\midrule
+\code{random\_init} & & & 0.6475 & & & 0.7032 \\
+\code{gbm} & & & 0.8292 & & & 0.8589 \\
+\code{lr} & & & 0.7894 & & & 0.8281 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{End-to-end fine-tuning of each objective's seed-1 checkpoint, at most
+5 epochs with early stopping on tuning AUROC, same full held-out splits and
+200 bootstrap resamples. The parenthesised number is the fine-tuned point
+minus that objective's two-seed probe mean in Table~\ref{tab:a2probe}, in
+AUROC points. \code{ft\_random} is the same architecture and schedule trained
+from random initialization. \code{ar\_cont} has no row: it is a control on the
+value term and was not carried into the fine-tuning grids. Sources:
+\code{docs/experiments/a2ft-physionet2019/summary.md},
+\code{a2ft-physionet2012/summary.md}.}
+\label{tab:a2ft}
+\begin{tabular}{lrrrr}
+\toprule
+objective & \code{sepsis\_6h} & \code{sepsis\_stay} & \code{mortality/24h} & \code{mortality/48h} \\
+\midrule
+\code{ar\_bins} & 0.8264 ($+0.9$) & 0.7861 ($+3.0$) & 0.7999 ($+3.7$) & 0.8355 ($+3.4$) \\
+\code{hybrid\_bins} & \best{0.8403} ($+1.3$) & 0.7726 ($+0.7$) & 0.7969 ($+3.1$) & 0.8304 ($+4.6$) \\
+\code{latent\_cont} & 0.8102 ($+3.2$) & 0.7521 ($+5.6$) & 0.7700 ($+5.2$) & 0.8103 ($+5.3$) \\
+\code{latent\_only} & 0.7270 ($+10.3$) & 0.6182 ($+2.5$) & 0.6443 ($-1.0$) & 0.6596 ($-4.6$) \\
+\midrule
+\code{ft\_random} & 0.7438 & 0.6359 & 0.6540 & 0.6843 \\
+\code{gbm} & 0.8363 & 0.7693 & 0.8292 & 0.8589 \\
+\code{lr} & 0.7852 & 0.7681 & 0.7894 & 0.8281 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{What the numbers show.} Six readings, all from
+Tables~\ref{tab:a2probe} and \ref{tab:a2ft}.
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=3pt]
+\item The code-loss-free latent objectives never beat binned AR. Every
+      \code{latent\_cont} and \code{latent\_only} entry is below every
+      \code{ar\_bins} entry for the same task, on either source, at either
+      probe seed, and under fine-tuning. \code{latent\_only} is a further
+      5.2 to 15.4 points below \code{latent\_cont}.
+\item Pure latent pretraining sits at or below its untrained control under the
+      probe --- \code{latent\_only} minus \code{random\_init} is $-6.2$,
+      $-3.4$, $+0.7$ and $+0.3$ points across the four tasks, the two positive
+      differences inside the control's own bootstrap interval --- and below
+      from-scratch training under fine-tuning, by $1.0$ to $2.5$ points on all
+      four tasks.
+\item The continuous value-regression auxiliary recovers part of the distance
+      to AR and not all of it: on \code{sepsis\_6h} it moves the pure latent
+      objective from 0.6243 to 0.7787 under the probe and from 0.7270 to
+      0.8102 fine-tuned, against \code{ar\_bins} at 0.8175 and 0.8264.
+\item The hybrid equals binned AR within the seed spread except on
+      \code{sepsis\_6h}. \code{hybrid\_bins} minus \code{ar\_bins} is $+1.0$,
+      $+0.9$, $+0.3$ and $-1.6$ points under the probe against a per-cell
+      two-seed spread of 0.0002 to 0.0226; fine-tuned, \code{sepsis\_6h} is
+      $+1.4$ (0.8403 against 0.8264) and is the only cell in either
+      fine-tuning grid above \code{gbm} on that task (0.8403 against 0.8363),
+      while the other three tasks are $-1.4$, $-0.3$ and $-0.5$ points from
+      \code{ar\_bins}.
+\item Fine-tuning adds over the frozen probe, and adds more over from-scratch
+      training: $+0.7$ to $+5.6$ points over the probe for the three
+      objectives carrying a code or value term (8 of 8 positive), and
+      $+8.3$ to $+15.1$ points over \code{ft\_random} for \code{ar\_bins} and
+      \code{hybrid\_bins} ($+6.6$ to $+12.6$ for \code{latent\_cont},
+      $-2.5$ to $-1.0$ for \code{latent\_only}).
+\item \code{gbm} is ahead of every trained cell on all four tasks under the
+      probe, and remains ahead on both 2012 tasks once fine-tuning is allowed;
+      on the two 2019 tasks the fine-tuned hybrid (\code{sepsis\_6h}, 0.8403
+      against 0.8363) and the fine-tuned \code{ar\_bins}
+      (\code{sepsis\_stay}, 0.7861 against 0.7693) pass it.
+\end{enumerate}
+
+\paragraph{Verdict under the decision rule.} The latent objectives without a
+code loss --- (4) \code{latent\_cont} and (5) \code{latent\_only} --- do not
+beat the binned-AR baseline (1) on any of the four continuous-state tasks, on
+either source, at either probe seed, or under fine-tuning. By the rule fixed
+before training, the JEPA framing --- that predicting in representation space
+is itself the useful part --- is \textbf{not supported} by anything measured
+in this paper, and the claim the evidence carries is limited to the hybrid as
+a regularizer riding on a code-prediction loss, with a short-horizon signature:
+its one margin outside the seed spread is on \code{sepsis\_6h}, the
+6-hour-horizon task.
+
+\paragraph{The first pass of the probe grids was invalid.} The grids first run
+on 2026-09-10 trained every cell on DE-SynPUF and evaluated it on ICU data:
+the grid file's \code{source} field reached the evaluator but not the trainer.
+Commit \code{89bdf94} fixed it, every number in this section comes from a cell
+retrained after that commit, and the invalid numbers were never committed to
+the repository.
+
+\paragraph{The pretrained-encoder cell was not run.} Objective (6), a
+Qwen2.5-0.5B/LoRA encoder over serialized events, was in all four
+pre-registered grid files and was dropped from all four on compute grounds: a
+frozen-probe evaluation must embed every training anchor to fit the probe
+(about 315{,}000 anchors on \code{sepsis\_6h}, roughly one day per cell at the
+0.5B encoder's measured throughput on the RTX 4060), and under fine-tuning no
+epoch completed in 14 hours on the same card. The question that cell was
+written to answer --- what a pretrained language-model encoder contributes on
+continuous ICU state, which is the encoder Clin-JEPA uses --- is therefore
+untested here (Section~\ref{sec:limitations}).
 
 %==============================================================================
 \section{Discussion}
@@ -1923,6 +2112,28 @@ left for future work.
 \item \textbf{No claim about grid-1 numbers against grid 2--5 numbers.} They
       were read off the same encoders through different pooling. Only
       within-grid, control-matched gains are comparable across grids.
+\item \textbf{No claim that the continuous-state test settles Clin-JEPA's
+      result.} Section~\ref{sec:a2results} removes one confound this paper
+      could remove --- the target is now continuous hourly ICU state on the
+      same kind of data Clin-JEPA \citep{clinjepa} pretrains on, not the
+      discrete low-entropy code stream the DE-SynPUF diagnostics
+      (Section~\ref{sec:diagnostics}) implicate --- and the code-loss-free
+      latent objectives still lose to binned AR on all four tasks, at both
+      readouts, which is evidence that the continuity of the target is not by
+      itself what makes a latent objective carry its own weight. It leaves
+      Clin-JEPA's other two differences in place. Its encoder is a pretrained
+      Qwen3-8B with LoRA rather than a transformer trained from random
+      initialization, and objective (6) --- the cell written to test exactly
+      that substitution --- did not run on the available hardware
+      (Section~\ref{sec:a2results}), so the pretrained-encoder question this
+      paper set out to ask is unanswered. Its budget is 430 GPU-hours on eight
+      H200s against 100M and 40M nominal token slots per cell on one RTX 4060
+      here. A latent objective whose useful part is supplied by a large
+      pretrained encoder, or appears only above these budgets, would look like
+      the null measured here; what this paper can report is that on these two
+      sources, at these budgets, from random initialization, predicting in
+      representation space without a code loss does not beat predicting the
+      next token.
 \end{itemize}
 
 %==============================================================================
@@ -1977,9 +2188,13 @@ left for future work.
       48M points are Apple M4/MPS at 4$\times$192 in fp32; the 200M and 1B
       points are RTX 4060 at 6$\times$256 in bf16. The 48M-to-200M step is
       therefore not a clean token-budget comparison.
-\item \textbf{Frozen linear probes are the only readout.} No fine-tuning was
-      run. An objective that produces a representation a linear probe cannot
-      read but a fine-tune can would look like a null result here.
+\item \textbf{Frozen linear probes are the only readout} for every DE-SynPUF
+      result in this paper. No fine-tuning was
+      run on DE-SynPUF. An objective that produces a representation a linear probe cannot
+      read but a fine-tune can would look like a null result here. The two
+      ICU sources of Section~\ref{sec:a2results} are the exception: they
+      carry both readouts, and there the ranking of the objectives is the same
+      under fine-tuning as under the probe (Table~\ref{tab:a2ft}).
 \item \textbf{No MIMIC-IV or EHRSHOT results.} The ETL for MIMIC-IV exists and
       is tested against the demo subset, but no pretraining or evaluation run on
       it is reported.
@@ -1988,6 +2203,30 @@ left for future work.
       numbers and definitions are recorded in the protocol documents, but no
       committed script regenerates them. One of the four did not survive
       re-measurement.
+\item \textbf{The pretrained language-model encoder is untested.} Objective
+      (6) of the pre-registered continuous-state test --- a hybrid over a
+      Qwen2.5-0.5B/LoRA encoder --- was in all four grid files and ran in
+      none of them: a frozen-probe evaluation must embed every training anchor
+      (about 315{,}000 on \code{sepsis\_6h}, roughly a day per cell on the
+      RTX 4060), and under fine-tuning no epoch completed in 14 hours. Since
+      Clin-JEPA's continuous-target result rests on a pretrained 8B encoder,
+      the one difference from this paper's setup that most plausibly accounts
+      for it is the one difference this paper could not measure.
+\item \textbf{The fine-tuning grids are a single seed.} Table~\ref{tab:a2ft}
+      fine-tunes each objective's seed-1 pretraining checkpoint once, with one
+      fine-tuning seed, so it has no seed spread of its own; the two-seed
+      spread in Table~\ref{tab:a2probe} reaches 0.0226 AUROC on
+      \code{sepsis\_stay}, which is larger than several of the
+      objective-to-objective differences in the fine-tuned table. The
+      fine-tuned margins should be read against that, not as replicated
+      measurements.
+\item \textbf{The 2012 source is small.} PhysioNet/CinC 2012 is 12{,}000
+      stays and 5.3M events, so its cells are trained to 40M nominal token
+      slots against 100M on the 2019 source, and its bootstrap intervals are
+      correspondingly wide (about $\pm$0.03 AUROC at the point estimates in
+      Table~\ref{tab:a2probe}, against about $\pm$0.02 on
+      \code{sepsis\_6h}). Both of its tasks are also the same outcome at two
+      anchor times, so they are not independent tasks.
 \end{enumerate}
 
 %==============================================================================
@@ -2158,6 +2397,11 @@ commit & date & result \\
 \code{7d0f7e8} & 2026-09-10 & add \code{sepsis\_6h}, \code{sepsis\_stay}, \code{mortality\_inhospital/\{24h,48h\}} tasks \\
 \code{3c1b30f} & 2026-09-10 & test the PhysioNet ETLs and the ICU task labels \\
 \code{b9b7053} & 2026-09-10 & record the \code{lr}/\code{gbm} baselines on both PhysioNet sources \\
+\code{89bdf94} & 2026-09-10 & fix: train each a2 cell on its own grid's source (see below) \\
+\code{039c63c} & 2026-09-14 & drop the language-model probe cells from the a2 grids \\
+\code{1491da1} & 2026-09-14 & a2 probe grids: five objectives, two seeds, both PhysioNet sources \\
+\code{b35a09f} & 2026-09-15 & drop the language-model cell from the a2ft grids \\
+\code{e68e4b5} & 2026-09-15 & a2 fine-tuning grids, both PhysioNet sources \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -2166,6 +2410,19 @@ Weight decay is applied to matrices only: every parameter with fewer than two
 dimensions, every name containing \code{emb}, the \code{[CLS]} token and the
 predictor's \code{[MASK]} token are excluded. Step counts are derived as
 $\lceil \text{budget} / (\text{batch} \times \text{max\_len}) \rceil$.
+
+\paragraph{The first pass of the a2 probe grids does not reproduce and is not
+in the repository.} The grids first run on 2026-09-10 trained every cell on
+DE-SynPUF and evaluated it on ICU data --- the grid file's \code{source} field
+reached the evaluator but not the trainer. Commit \code{89bdf94} fixed that;
+every cell in Section~\ref{sec:a2results} was retrained after it, and the
+numbers from the invalid pass were never committed. Cell-level provenance is
+the \code{commit} field of each \code{eval/\textless
+cell\textgreater/results.json}: the 2019 seed-1 probe cells were scored at
+\code{89bdf94}, the 2019 seed-2 and all 2012 probe cells at \code{039c63c}
+(same code path, language-model cells removed from the grid file), the 2019
+fine-tuning cells at \code{ce0692e} and the 2012 fine-tuning cells at
+\code{b35a09f}.
 
 \paragraph{One inconsistency to be aware of when reproducing.}
 The header comment in \code{configs/grids/}\allowbreak\code{scale\_desynpuf.yaml} describes the

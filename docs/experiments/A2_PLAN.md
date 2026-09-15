@@ -107,3 +107,24 @@ anything measured in this project.
 Not run. This document and Section "Where latent prediction stands, and a
 pre-registered test on continuous state" of `docs/paper/main.tex` are written
 before training starts.
+
+## Outcome
+
+Run. Probe grids recorded in commit `1491da1`
+([`a2-physionet2019/`](a2-physionet2019/), [`a2-physionet2012/`](a2-physionet2012/)),
+fine-tuning grids in `e68e4b5`
+([`a2ft-physionet2019/`](a2ft-physionet2019/), [`a2ft-physionet2012/`](a2ft-physionet2012/)).
+Numbers, tables and bootstrap intervals: [`A2_RESULTS.md`](A2_RESULTS.md).
+
+By the decision rule fixed above, the latent objectives without a code loss —
+(4) `latent_cont` and (5) `latent_only` — do not beat the binned-AR baseline
+(1) on any of these four continuous-state tasks, on either dataset, at either
+probe seed, or under fine-tuning, so the JEPA framing — that predicting in
+representation space is itself the useful part — is **not supported**; the
+claim this project's evidence carries is limited to the hybrid as a
+regularizer riding on a code-prediction loss.
+
+Objective (6), the Qwen2.5-0.5B/LoRA pretrained-encoder cell, was dropped from
+the probe grids (commit `039c63c`) and the fine-tuning grids (`b35a09f`) on
+compute grounds and is untested; see
+[`A2_RESULTS.md`](A2_RESULTS.md#cells-not-run).
