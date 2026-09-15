@@ -1,0 +1,14 @@
+{
+  "ft_random@ar_bins_s1": {
+    "mortality_inhospital/24h": 0.6539895623742455,
+    "mortality_inhospital/48h": 0.6842618209255533
+  },
+  "gbm": {
+    "mortality_inhospital/24h": 0.8291876257545272,
+    "mortality_inhospital/48h": 0.8589159959758551
+  },
+  "lr": {
+    "mortality_inhospital/24h": 0.7893737424547282,
+    "mortality_inhospital/48h": 0.8280621227364184
+  }
+}
