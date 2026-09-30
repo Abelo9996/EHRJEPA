@@ -235,9 +235,28 @@ GBM (0.8363) on any ICU task. GBM otherwise remains a hard count-feature ceiling
 
 MIMIC brings ~**77× more events** than DE-SynPUF *and* a whole lab/vital modality DE-SynPUF lacks —
 which is exactly the value path the ablations flagged as under-exercised. **Status: acquired, verified
-(SHA-256 identical end-to-end), characterized, staged.** Remaining for the real result: install
-`meds_etl`, run the ETL → cache → pretrain the hybrid default (≥2-seed) — *not a 10-hour job, so no
-half-trained numbers are presented here.*
+(SHA-256 identical end-to-end), characterized, and the full pipeline validated end-to-end** (ETL →
+cache → train → eval; `meds_etl` patched for two MIMIC-IV v3.1 incompatibilities — nullable admission
+fields and a shard-memory OOM).
+
+### Preliminary hybrid-vs-AR on MIMIC-IV (honest — within noise)
+
+A first comparison on a ~30k-subject subset, 2 seeds, at two budgets (20M and 100M tokens), evaluated
+on the same seven task configs (their predicates already map to MIMIC codes).
+
+![Preliminary MIMIC-IV hybrid vs AR](figures/mimic_hybrid_vs_ar.png)
+
+- **The comparison is within seed noise.** Both budgets give mean-of-6 non-mortality Δ ≈ **+0.006**
+  (100M: hybrid 0.748 vs AR 0.743), but the *per-task* wins flip between budgets (CKD/HF favor hybrid
+  at 20M, AR at 100M) — so **the clean DE-SynPUF advantage does not reproduce on MIMIC at this scale.**
+- **Real positives:** trained encoders beat their random-init control on every task and improve with
+  training (CKD .78→.85, mortality .87→.91 over 20M→100M); on **readmission the encoders beat the
+  count baselines** (.63 vs GBM .617 / LR .626).
+- Both still trail GBM/LR on the pure-diagnosis tasks (.88–.94) — the diagnosis code sits directly in
+  the count features (a famously high bar on MIMIC).
+- **Context / honest boundary:** on DE-SynPUF the hybrid edge was also small at pilot scale (+0.008 at
+  48M) and only became statistically clean at **1B tokens** — so a full-scale MIMIC stage-B run is the
+  honest next step; no MIMIC win is claimed here.
 
 ---
 
