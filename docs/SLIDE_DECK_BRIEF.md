@@ -98,11 +98,14 @@ Suggested length: 12–14 slides. Tone: measured, evidence-first, no hype.
 - Numbers: **364,627 patients · 546,028 admissions · 94,458 ICU stays · 875 M events** (chartevents 433 M, labevents 158 M). Vocab: 112 K ICD-dx / 4,095 chart / 1,650 lab items. ~77× more events than DE-SynPUF **plus** a whole lab/vital modality.
 - Status: acquired via BigQuery, verified byte-identical, characterized, ETL + tokenizer pipeline validated end-to-end on MIMIC.
 
-## Slide 13 — Preliminary MIMIC-IV result  [FILL WHEN THE RUN COMPLETES]
-- **Message (expected):** the DE-SynPUF finding — hybrid ≥ AR — tested on real data.
-- Figure: `figures/mimic_hybrid_vs_ar.png`  *(will be added to the package when the run finishes)*
-- Numbers: **[per-task AUROC hybrid vs AR vs GBM/LR on ~30k MIMIC-IV subjects; PENDING — will be provided]**
-- Speaker notes: label this "preliminary" — a subject subset + short budget, run in-session; not the full stage-B result.
+## Slide 13 — Preliminary MIMIC-IV result
+- **Message:** On real hospital data, the same shape holds — the hybrid edges the AR baseline on the chronic-diagnosis tasks — but at a short budget both trail strong count baselines, and the margin is within seed noise.
+- Figure: `figures/mimic_hybrid_vs_ar.png`
+- Numbers (~30k-subject subset, **20M tokens, 2 seeds**, full held-out; end-to-end pipeline validated on MIMIC-IV v3.1):
+  - **hybrid ahead of AR on 5 of 6 non-mortality tasks** — mean-of-6 **0.7035 vs 0.6978 (Δ +0.006)**; biggest gains **HF +0.017, CKD +0.014** (same shape as the DE-SynPUF finding). Per task (AR→hybrid): inpatient .602→.596 · CKD .766→.780 · COPD .712→.713 · T2DM .736→.741 · HF .792→.810 · readmit .579→.582; mortality .861→.872.
+  - Both trail the count baselines (GBM/LR reach **.88–.94** on the diagnosis tasks) — expected on MIMIC at this short budget (the diagnosis code sits directly in the count features; MEDS-Tab baselines are a famously high bar).
+- **Say this honestly:** *preliminary* — a subject subset + a short in-session budget, not the full stage-B run; the +0.006 margin is within seed noise. A larger-budget run is in progress; if it finishes before the talk, swap in `figures/mimic_hybrid_vs_ar.png` (this file is regenerated) and its numbers.
+- Speaker notes: the headline here is that **the whole pipeline now runs on real MIMIC-IV** (ETL→cache→train→eval) and the hybrid's direction of advantage carries over; the clean magnitude needs the full run.
 
 ## Slide 14 — Takeaways, limitations, next steps
 - **Takeaways:** (1) masked-span latent JEPA alone doesn't clear its control; (2) a next-latent + code hybrid is the strongest objective at every budget; (3) AR plateaus, the hybrid scales; (4) it wins few-shot at every k; (5) on continuous ICU state the strong JEPA claim is not supported — the honest boundary.
