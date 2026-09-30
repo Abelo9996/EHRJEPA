@@ -58,10 +58,14 @@ def stack(rows):
 
 
 def main() -> int:
+    global SUMMARY
     ap = argparse.ArgumentParser()
+    ap.add_argument("--summary", type=Path, default=SUMMARY)
+    ap.add_argument("--label", default="20M tokens")
     ap.add_argument("--out", type=Path, default=ROOT / "docs/figures/mimic_hybrid_vs_ar.png")
     ap.add_argument("--dpi", type=int, default=170)
     args = ap.parse_args()
+    SUMMARY = args.summary
 
     hy = parse_task_rows(lambda r: r.startswith("hybrid"))
     ar = parse_task_rows(lambda r: r.startswith("ar_s") or r == "ar")
@@ -93,7 +97,7 @@ def main() -> int:
     ax.set_ylim(max(0.45, lo), 0.95)
     nonmort = [i for i, t in enumerate(TASKS) if t != "mortality_365d"]
     delta = hy_m[nonmort].mean() - ar_m[nonmort].mean()
-    ax.set_title(f"MIMIC-IV v3.1 (~30k subjects, 20M tokens) — EHR-JEPA hybrid vs AR "
+    ax.set_title(f"MIMIC-IV v3.1 (~30k subjects, {args.label}) — EHR-JEPA hybrid vs AR "
                  f"[mean-of-6 Δ = {delta:+.3f}]", fontsize=11, color=INK, pad=10)
     ax.grid(axis="y", color=GRID, linewidth=0.8); ax.set_axisbelow(True)
     for s in ("top", "right"):

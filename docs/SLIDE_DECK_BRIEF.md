@@ -98,14 +98,18 @@ Suggested length: 12–14 slides. Tone: measured, evidence-first, no hype.
 - Numbers: **364,627 patients · 546,028 admissions · 94,458 ICU stays · 875 M events** (chartevents 433 M, labevents 158 M). Vocab: 112 K ICD-dx / 4,095 chart / 1,650 lab items. ~77× more events than DE-SynPUF **plus** a whole lab/vital modality.
 - Status: acquired via BigQuery, verified byte-identical, characterized, ETL + tokenizer pipeline validated end-to-end on MIMIC.
 
-## Slide 13 — Preliminary MIMIC-IV result
-- **Message:** On real hospital data, the same shape holds — the hybrid edges the AR baseline on the chronic-diagnosis tasks — but at a short budget both trail strong count baselines, and the margin is within seed noise.
-- Figure: `figures/mimic_hybrid_vs_ar.png`
-- Numbers (~30k-subject subset, **20M tokens, 2 seeds**, full held-out; end-to-end pipeline validated on MIMIC-IV v3.1):
-  - **hybrid ahead of AR on 5 of 6 non-mortality tasks** — mean-of-6 **0.7035 vs 0.6978 (Δ +0.006)**; biggest gains **HF +0.017, CKD +0.014** (same shape as the DE-SynPUF finding). Per task (AR→hybrid): inpatient .602→.596 · CKD .766→.780 · COPD .712→.713 · T2DM .736→.741 · HF .792→.810 · readmit .579→.582; mortality .861→.872.
-  - Both trail the count baselines (GBM/LR reach **.88–.94** on the diagnosis tasks) — expected on MIMIC at this short budget (the diagnosis code sits directly in the count features; MEDS-Tab baselines are a famously high bar).
-- **Say this honestly:** *preliminary* — a subject subset + a short in-session budget, not the full stage-B run; the +0.006 margin is within seed noise. A larger-budget run is in progress; if it finishes before the talk, swap in `figures/mimic_hybrid_vs_ar.png` (this file is regenerated) and its numbers.
-- Speaker notes: the headline here is that **the whole pipeline now runs on real MIMIC-IV** (ETL→cache→train→eval) and the hybrid's direction of advantage carries over; the clean magnitude needs the full run.
+## Slide 13 — Preliminary MIMIC-IV result (honest — do not overstate)
+- **Message:** We validated the full pipeline on *real* hospital data; at preliminary budgets the hybrid and AR are **within seed noise of each other** — the clean DE-SynPUF advantage does **not** yet reproduce on MIMIC at this scale.
+- Figure: `figures/mimic_hybrid_vs_ar.png` (shows the 100M-token run)
+- What's real and positive (say these):
+  - **The whole pipeline now runs on real MIMIC-IV v3.1** — ETL → cache → train → eval, end to end (~30k-subject subset, 2 seeds).
+  - Trained encoders **beat their random-init control on every task**, and improve markedly with more training (20M→100M: CKD .78→.85, HF .81→.84, mortality .87→.91).
+  - On **readmission the encoders beat the count baselines** (hybrid .630 vs GBM .617 / LR .626) — a task where learned representations add over counts.
+- What's honest about the comparison (say these too):
+  - **Two budgets, 2 seeds each, both give mean-of-6 Δ ≈ +0.006** (20M: 0.7035 vs 0.6978; 100M: 0.7481 vs 0.7425) — a consistently small edge, but **per-task wins flip between budgets** (CKD/HF favored hybrid at 20M, AR at 100M), i.e. within noise. Not a clean win.
+  - Both still trail count baselines on the pure-diagnosis tasks (GBM/LR .88–.94), where the diagnosis code sits directly in the features — a famously high bar on MIMIC.
+- **Framing for the talk:** *preliminary, subject subset + pilot-scale budget.* Note that on DE-SynPUF the hybrid advantage was also small at pilot scale (48M, +0.008) and only became statistically clean at **1B tokens** — so a full-scale MIMIC (stage-B) run is the honest next step to test whether it reproduces. Do not claim a MIMIC win.
+- Speaker notes: this is the *right* kind of slide — it shows the method extends to real data and states plainly where the evidence currently stops.
 
 ## Slide 14 — Takeaways, limitations, next steps
 - **Takeaways:** (1) masked-span latent JEPA alone doesn't clear its control; (2) a next-latent + code hybrid is the strongest objective at every budget; (3) AR plateaus, the hybrid scales; (4) it wins few-shot at every k; (5) on continuous ICU state the strong JEPA claim is not supported — the honest boundary.
