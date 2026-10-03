@@ -1,0 +1,20 @@
+# Phase 0 noise-floor: AR at 300M tokens, 3 seeds, on the ~30k MIMIC cache.
+# Measures the AR seed spread at the working budget (and so whether 30k is adequate).
+# Gate: if 3-seed mean-of-6 spread < 0.01, 300M + 3 seeds becomes the standard for Phase 1.
+name: mimic-ar-noise-300m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 300000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0]
+runs:
+  - {name: ar_s0, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: ar_s1, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
+  - {name: ar_s2, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 2}}
