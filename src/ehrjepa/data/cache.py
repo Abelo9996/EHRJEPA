@@ -38,6 +38,7 @@ Feature semantics, per event:
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -57,9 +58,15 @@ from ehrjepa.data.tokenize import (
     Z_CLIP,
     Vocabulary,
     fit_tokenizer,
+    load_quantizer,
     split_shards,
     write_fit,
 )
+
+#: The tokenizer files :func:`build_cache` copies verbatim under ``reuse_fit_from``.
+_FIT_FILES = ("vocab.parquet", "quantizer.parquet", "vocab.json")
+#: ``vocab.json`` keys that describe the file rather than the fit.
+_NON_FIT_KEYS = frozenset({"tokenizer_version", "specials", "top_codes"})
 
 __all__ = [
     "FEATURES",
@@ -244,19 +251,45 @@ def build_cache(
     max_vocab: int | None = None,
     ndc_digits: int = DEFAULT_NDC_DIGITS,
     splits: Sequence[str] = SPLITS,
+    reuse_fit_from: str | Path | None = None,
 ) -> dict[str, object]:
-    """Fit the tokenizer on train, tensorize every split, and write ``meta.json``."""
+    """Fit the tokenizer on train, tensorize every split, and write ``meta.json``.
+
+    With ``reuse_fit_from`` (a built cache, or a directory written by
+    ``tokenize fit``) nothing is fit: that directory's vocabulary and quantizer are
+    copied in byte for byte, so two caches built from different MEDS directories
+    map every event to the same ids, value bins and z-scores. That is what a
+    data-quantity comparison needs -- the larger subset then differs from the
+    smaller one only in how many subjects it holds, not in how they are tokenized.
+    The fit arguments (``min_count``, ``max_vocab``, ...) are ignored in that case.
+    """
     started = time.perf_counter()
     root = Path(meds_dir)
     out = Path(cache_dir)
-    vocab, quantizer, fit_stats = fit_tokenizer(
-        root,
-        min_count=min_count,
-        min_value_obs=min_value_obs,
-        max_vocab=max_vocab,
-        ndc_digits=ndc_digits,
-    )
-    write_fit(out, vocab, quantizer, fit_stats)
+    if reuse_fit_from is None:
+        vocab, quantizer, fit_stats = fit_tokenizer(
+            root,
+            min_count=min_count,
+            min_value_obs=min_value_obs,
+            max_vocab=max_vocab,
+            ndc_digits=ndc_digits,
+        )
+        write_fit(out, vocab, quantizer, fit_stats)
+    else:
+        source = Path(reuse_fit_from)
+        summary = json.loads((source / "vocab.json").read_text())
+        if summary.get("tokenizer_version") != TOKENIZER_VERSION:
+            raise ValueError(
+                f"{source} was fit by tokenizer version {summary.get('tokenizer_version')}, "
+                f"this build is version {TOKENIZER_VERSION}"
+            )
+        out.mkdir(parents=True, exist_ok=True)
+        for name in _FIT_FILES:
+            shutil.copyfile(source / name, out / name)
+        vocab = Vocabulary.read(out / "vocab.parquet")
+        quantizer = load_quantizer(out / "quantizer.parquet")
+        fit_stats = {k: v for k, v in summary.items() if k not in _NON_FIT_KEYS}
+        fit_stats["reused_from"] = str(source)
 
     resolver_cache: dict[str, tuple[int, int]] = {}
     per_split = {
