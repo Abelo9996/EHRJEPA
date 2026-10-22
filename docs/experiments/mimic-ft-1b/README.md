@@ -22,3 +22,23 @@ from `summary.md`; mean-of-6 = non-mortality AUROC.
 
 **Caveat:** single seed. The +0.011 over GBM is inside the per-task bootstrap intervals; seeds 1–2
 (fine-tuning the s1/s2 checkpoints) are needed before it can be read as beating GBM.
+
+## Seeds 1–2 (`docs/experiments/mimic-ft-1b-s12`, grid `configs/grids/mimic_ft_1b_s12.yaml`)
+
+Same cohort and settings; fine-tunes the seed-1/2 pretraining checkpoints; lr/gbm read from the
+seed-0 grid's predictions. Combined 3-seed mean-of-6 (fine-tuned, 8% labels, 3,038 test subjects):
+
+| fine-tuned encoder | s0 | s1 | s2 | mean | vs GBM 0.808 |
+|---|---|---|---|---|---|
+| hybrid, pretrained on 25% | 0.818 | 0.820 | 0.825 | **0.821** | +0.013 (every seed >= +0.010) |
+| AR, pretrained on 25% | 0.814 | 0.810 | 0.816 | 0.813 | +0.005 |
+| hybrid, pretrained on 8% | 0.819 | 0.809 | 0.811 | 0.813 | +0.005 (s1 only +0.0004) |
+| AR, pretrained on 8% | 0.803 | 0.810 | 0.806 | 0.806 | −0.002 |
+
+- Hybrid pretrained on 25% of patients (unlabeled) and fine-tuned on the same labels GBM uses is above
+  GBM on all three seeds; the gap (+0.013) is ~2x its seed range (0.006).
+- At 25% pretraining hybrid > AR with non-overlapping seed ranges (min 0.818 > max 0.816); at 8% the
+  ranges overlap.
+- Under fine-tuning, 25% pretraining does help hybrid (0.813 -> 0.821) — the frozen probe hid this
+  (probe: 0.794 -> 0.796). The seed-0-only reading above ("does not move") is superseded.
+- Not yet done: a paired bootstrap of hybrid − GBM on the shared anchors.
