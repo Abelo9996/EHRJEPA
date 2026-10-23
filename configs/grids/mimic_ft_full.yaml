@@ -1,0 +1,23 @@
+# Fine-tune the full-MIMIC seed-0 checkpoints (mimic-full-1b) on the 8% source, exactly as
+# mimic-ft-1b / mimic-ft-1b-s12 did for the 8% and 25% checkpoints (vs GBM 0.808).
+name: mimic-ft-full
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 0
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_full_s0, reuse_checkpoint: runs/mimic-full-1b/hybrid_s0/final.pt}
+  - {name: ar_full_s0, reuse_checkpoint: runs/mimic-full-1b/ar_s0/final.pt}

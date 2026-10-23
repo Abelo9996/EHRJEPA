@@ -1,0 +1,27 @@
+# Full MIMIC-IV (all 364,627 patients) at the same 1B-token budget as mimic-scale-1b (8%) and
+# mimic-data25-1b (25%): the third point of the data-scaling series. Tokenized with the 8% fit
+# (tokenize build --reuse-fit-from data/cache/mimic-iv), so ids, value bins and z-scores match.
+#
+# Deliberate exception to train_cache_dir(): source is mimic-iv (the 8% source), so each cell is
+# probed on the same 3,038 held-out subjects, labels and LR/GBM (0.795/0.808) as Eval-A and
+# mimic-ft-1b, while every run overrides data.cache_dir to the full cache for pretraining. Safe
+# because both caches share one tokenizer and the hash-based splits keep the 8% held-out subjects
+# out of the full train split (checked in the prep script). Fine-tuning: mimic_ft_full.yaml.
+name: mimic-full-1b
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 1000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: ar_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
