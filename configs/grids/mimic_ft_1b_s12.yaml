@@ -1,0 +1,32 @@
+# Seeds 1-2 of mimic-ft-1b: does fine-tuned hybrid's lead over count-GBM (seed 0: 0.819 vs 0.808
+# mean-of-6) survive replication? Same settings and cohort as configs/grids/mimic_ft_1b.yaml; the
+# cells fine-tune the seed-1 and seed-2 pretraining checkpoints of mimic-scale-1b (8%) and
+# mimic-data25-1b (25%). The seed-0 grid already ran the from-scratch control (ft_random 0.689),
+# so none here; lr/gbm are read from the seed-0 grid's predictions (same anchors, same seed).
+name: mimic-ft-1b-s12
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 0
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_8pct_s1, reuse_checkpoint: runs/mimic-scale-1b/hybrid_s1/final.pt}
+  - {name: ar_8pct_s1, reuse_checkpoint: runs/mimic-scale-1b/ar_s1/final.pt}
+  - {name: hybrid_8pct_s2, reuse_checkpoint: runs/mimic-scale-1b/hybrid_s2/final.pt}
+  - {name: ar_8pct_s2, reuse_checkpoint: runs/mimic-scale-1b/ar_s2/final.pt}
+  - {name: hybrid_25pct_s1, reuse_checkpoint: runs/mimic-data25-1b/hybrid_s1/final.pt}
+  - {name: ar_25pct_s1, reuse_checkpoint: runs/mimic-data25-1b/ar_s1/final.pt}
+  - {name: hybrid_25pct_s2, reuse_checkpoint: runs/mimic-data25-1b/hybrid_s2/final.pt}
+  - {name: ar_25pct_s2, reuse_checkpoint: runs/mimic-data25-1b/ar_s2/final.pt}

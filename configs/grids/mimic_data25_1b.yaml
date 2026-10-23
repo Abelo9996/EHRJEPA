@@ -1,0 +1,32 @@
+# Data-quantity test: does 3x more patients beat more passes over the same patients?
+# Identical to mimic_scale_1b.yaml (same model, objectives, 1B-token budget, seeds,
+# sigreg 0.05) except the source: the 25% MIMIC-IV subset (every 4th patient,
+# 91,157 subjects, a strict superset of the 8% every-12th subset), tokenized with the
+# 8% cache's vocabulary and quantizer (`tokenize build --reuse-fit-from`). At 1B
+# tokens the 8% cache is seen ~22 times, this one ~7 times.
+#
+# This grid scores "Eval-B": 25% held-out, probes and LR/GBM fit on 25% labels.
+# "Eval-A" is run separately on these checkpoints with `--source mimic-iv`: same
+# test patients, same probe labels and same GBM (0.808) as mimic-scale-1b, so the
+# only difference from mimic-scale-1b is how many subjects the encoder pretrained on.
+# Seed-0 pair first; seeds 1,2 follow for error bars.
+name: mimic-data25-1b
+base: configs/pretrain_default.yaml
+source: mimic-iv-25
+budget_tokens: 1000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0]
+runs:
+  - {name: ar_s0, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: hybrid_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: ar_s1, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
+  - {name: hybrid_s1, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: ar_s2, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 2}}
+  - {name: hybrid_s2, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 2}}

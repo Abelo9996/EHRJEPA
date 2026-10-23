@@ -1,0 +1,570 @@
+{
+  "source": "mimic-iv-25",
+  "meds_dir": "data/meds/mimic-iv-25",
+  "cache_dir": "data/cache/mimic-iv-25",
+  "task_dir": "data/tasks/mimic-iv-25",
+  "eval_split": "held_out",
+  "anchor_seed": 20260903,
+  "eval_subject_limit": null,
+  "eval_subject_seed": 0,
+  "n_boot": 200,
+  "seed": 0,
+  "commit": "b35a09f",
+  "created": "2026-10-08T16:57:58+00:00",
+  "models": {
+    "ckpt:hybrid_s0": {
+      "kind": "probe",
+      "checkpoint": "/home/gaming_pc/EHRJEPA/runs/mimic-data25-1b/hybrid_s0/final.pt",
+      "features": "last@final",
+      "random_init": false
+    }
+  },
+  "skipped": {
+    "sepsis_6h": "not defined on source family 'mimic'",
+    "sepsis_stay": "not defined on source family 'mimic'",
+    "mortality_inhospital/24h": "not defined on source family 'mimic'",
+    "mortality_inhospital/48h": "not defined on source family 'mimic'"
+  },
+  "tasks": {
+    "mortality_365d": {
+      "counts": {
+        "train": 27644,
+        "tuning": 3492,
+        "held_out": 3331
+      },
+      "prevalence": {
+        "train": 0.21331934597019245,
+        "tuning": 0.21534936998854526,
+        "held_out": 0.20174121885319724
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.03
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.9241608751358905
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.9248500349433141
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.9249538942382356
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.9247908254387327
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.9247078350675572
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.9246316392296939
+            }
+          ],
+          "tuning_auroc": 0.9249538942382356,
+          "n_features": 256,
+          "fit_seconds": 71.09,
+          "metrics": {
+            "auroc": {
+              "point": 0.933270205411988,
+              "lo": 0.9242134697309161,
+              "hi": 0.9418989922126622,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.7797671074625377,
+              "lo": 0.752093666414358,
+              "hi": 0.8110467490343979,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.0801197854869633,
+              "lo": 0.07459425038238524,
+              "hi": 0.08554048947207826,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.0201850337949274,
+              "lo": 0.9446196995126371,
+              "hi": 1.1040590564449255,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "inpatient_365d": {
+      "counts": {
+        "train": 27644,
+        "tuning": 3492,
+        "held_out": 3331
+      },
+      "prevalence": {
+        "train": 0.3697366517146578,
+        "tuning": 0.3691294387170676,
+        "held_out": 0.3722605824076854
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.003
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.7385735721829356
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.7380971078651124
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.737699173882008
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.7374672804945088
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.7373699099225366
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.7373290600623241
+            }
+          ],
+          "tuning_auroc": 0.7385735721829356,
+          "n_features": 256,
+          "fit_seconds": 5.14,
+          "metrics": {
+            "auroc": {
+              "point": 0.736002221502291,
+              "lo": 0.7196469437979527,
+              "hi": 0.7519691717047322,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.6466432548222243,
+              "lo": 0.6189830613927031,
+              "hi": 0.6743558801769142,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.19409317523149205,
+              "lo": 0.18857501996941636,
+              "hi": 0.19965246710515394,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 0.9290117945089585,
+              "lo": 0.8579412675280851,
+              "hi": 1.013494680624622,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "readmission_30d": {
+      "counts": {
+        "train": 25686,
+        "tuning": 3201,
+        "held_out": 3091
+      },
+      "prevalence": {
+        "train": 0.13645565677801136,
+        "tuning": 0.13402061855670103,
+        "held_out": 0.1329666774506632
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.01
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.6941820805457168
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.6944772399317853
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.6941661032570124
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.6931519658792384
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.6926591926591927
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.692323669596397
+            }
+          ],
+          "tuning_auroc": 0.6944772399317853,
+          "n_features": 256,
+          "fit_seconds": 66.28,
+          "metrics": {
+            "auroc": {
+              "point": 0.6705641500526565,
+              "lo": 0.6424135577744523,
+              "hi": 0.6911169014709986,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.2724123499956692,
+              "lo": 0.23884535907040014,
+              "hi": 0.31063588505771383,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.10855229500276484,
+              "lo": 0.1010645794476191,
+              "hi": 0.11591532095237977,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 0.8592348835091347,
+              "lo": 0.7192624631760284,
+              "hi": 0.9840870017572343,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "new_dx_365d/diabetes": {
+      "counts": {
+        "train": 24926,
+        "tuning": 3170,
+        "held_out": 3025
+      },
+      "prevalence": {
+        "train": 0.10246329134237342,
+        "tuning": 0.1,
+        "held_out": 0.10545454545454545
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.01
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.8577146641810436
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.857733461152741
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.8571087382698603
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.8563546479935338
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.856069376305422
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.8559604644399996
+            }
+          ],
+          "tuning_auroc": 0.857733461152741,
+          "n_features": 256,
+          "fit_seconds": 5.49,
+          "metrics": {
+            "auroc": {
+              "point": 0.8769609853408309,
+              "lo": 0.8565070197546077,
+              "hi": 0.8987907807648509,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.5715542452033905,
+              "lo": 0.5207982182247817,
+              "hi": 0.6218081426977855,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.06517351779265693,
+              "lo": 0.058235456506989317,
+              "hi": 0.07191658529263713,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.023112656120763,
+              "lo": 0.9295340011357118,
+              "hi": 1.1571968080916024,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "new_dx_365d/heart_failure": {
+      "counts": {
+        "train": 26017,
+        "tuning": 3306,
+        "held_out": 3132
+      },
+      "prevalence": {
+        "train": 0.0851750778337241,
+        "tuning": 0.07955232909860858,
+        "held_out": 0.0842911877394636
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.003
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.8934711467695602
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.8922966004380808
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.8910358374078011
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.8902049083541483
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.889827554107226
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.8897638287211564
+            }
+          ],
+          "tuning_auroc": 0.8934711467695602,
+          "n_features": 256,
+          "fit_seconds": 5.33,
+          "metrics": {
+            "auroc": {
+              "point": 0.8994257427834833,
+              "lo": 0.8802600597141621,
+              "hi": 0.9145460344410515,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.5046184116574506,
+              "lo": 0.4404433047680735,
+              "hi": 0.566111203222965,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.05605329571005063,
+              "lo": 0.05054485173647591,
+              "hi": 0.06207822502744006,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.0726749183239583,
+              "lo": 0.9732805911397068,
+              "hi": 1.178084692996318,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "new_dx_365d/ckd": {
+      "counts": {
+        "train": 25867,
+        "tuning": 3297,
+        "held_out": 3119
+      },
+      "prevalence": {
+        "train": 0.07484439633509878,
+        "tuning": 0.06733393994540492,
+        "held_out": 0.07919204873356846
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.003
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.8840079103493738
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.8825781879440415
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.8809712151175565
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.8795400278327108
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.8790185307258478
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.8786786786786787
+            }
+          ],
+          "tuning_auroc": 0.8840079103493738,
+          "n_features": 256,
+          "fit_seconds": 5.55,
+          "metrics": {
+            "auroc": {
+              "point": 0.8996594228231819,
+              "lo": 0.8832586329460803,
+              "hi": 0.9138404801254837,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.4729945199661138,
+              "lo": 0.4069715976706154,
+              "hi": 0.5380777207349494,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.054486376203317435,
+              "lo": 0.04795087763005178,
+              "hi": 0.059555396455291176,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.0912322275484738,
+              "lo": 0.9831168815597335,
+              "hi": 1.2103599186746443,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    },
+    "new_dx_365d/copd": {
+      "counts": {
+        "train": 26621,
+        "tuning": 3374,
+        "held_out": 3223
+      },
+      "prevalence": {
+        "train": 0.046504639194620785,
+        "tuning": 0.04919976289270895,
+        "held_out": 0.042817251008377286
+      },
+      "models": {
+        "ckpt:hybrid_s0": {
+          "kind": "probe",
+          "params": {
+            "C": 0.003
+          },
+          "grid": [
+            {
+              "C": 0.003,
+              "tuning_auroc": 0.8053792476639726
+            },
+            {
+              "C": 0.01,
+              "tuning_auroc": 0.803965237508638
+            },
+            {
+              "C": 0.03,
+              "tuning_auroc": 0.8024855031096957
+            },
+            {
+              "C": 0.1,
+              "tuning_auroc": 0.801813237989364
+            },
+            {
+              "C": 0.3,
+              "tuning_auroc": 0.8016123095874771
+            },
+            {
+              "C": 1.0,
+              "tuning_auroc": 0.8015935312321606
+            }
+          ],
+          "tuning_auroc": 0.8053792476639726,
+          "n_features": 256,
+          "fit_seconds": 4.18,
+          "metrics": {
+            "auroc": {
+              "point": 0.8227209733868884,
+              "lo": 0.7923593979327359,
+              "hi": 0.8482379111599855,
+              "n_boot_valid": 200
+            },
+            "auprc": {
+              "point": 0.15560676132909804,
+              "lo": 0.11848279972858133,
+              "hi": 0.20719151861090385,
+              "n_boot_valid": 200
+            },
+            "brier": {
+              "point": 0.03831179079085082,
+              "lo": 0.03365194967840881,
+              "hi": 0.043445596491368754,
+              "n_boot_valid": 200
+            },
+            "calibration_slope": {
+              "point": 1.0989169851721388,
+              "lo": 0.9255304984377669,
+              "hi": 1.27771892739101,
+              "n_boot_valid": 200
+            }
+          }
+        }
+      },
+      "paired": [],
+      "dropped_not_in_cache": 0
+    }
+  },
+  "runtime_seconds": 167.8
+}
