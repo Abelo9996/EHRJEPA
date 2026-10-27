@@ -134,7 +134,9 @@ class EventSequenceDataset(torch.utils.data.Dataset):
         """Restore a state returned by :meth:`rng_state`."""
         self._generator().bit_generator.state = dict(state)
 
-    def _slice(self, start: int, stop: int, subject_id: int) -> dict[str, torch.Tensor]:
+    def _slice(
+        self, start: int, stop: int, subject_id: int, at_end: bool = False
+    ) -> dict[str, torch.Tensor]:
         item: dict[str, torch.Tensor] = {}
         for name, array in self._arrays.items():
             values = np.array(array[start:stop])
@@ -143,6 +145,10 @@ class EventSequenceDataset(torch.utils.data.Dataset):
         item["length"] = torch.tensor(stop - start, dtype=torch.long)
         item["subject_id"] = torch.tensor(subject_id, dtype=torch.long)
         item["start"] = torch.tensor(start, dtype=torch.long)
+        # Whether the window runs to the subject's last event (or, for
+        # ``windows_at``, to the cutoff): the state objective only trusts the
+        # last time window of a crop as a target when nothing after it was cut.
+        item["at_end"] = torch.tensor(bool(at_end), dtype=torch.bool)
         return item
 
     def __getitem__(self, i: int) -> dict[str, torch.Tensor]:
@@ -154,7 +160,8 @@ class EventSequenceDataset(torch.utils.data.Dataset):
         else:
             # "full" keeps the most recent events, which is the causal context.
             start = offset + length - window
-        return self._slice(start, start + window, int(self._subject_id[i]))
+        stop = start + window
+        return self._slice(start, stop, int(self._subject_id[i]), at_end=stop == offset + length)
 
     # ------------------------------------------------------------------ #
 
@@ -177,7 +184,7 @@ class EventSequenceDataset(torch.utils.data.Dataset):
         times = self._arrays["time_min"][offset : offset + length]
         stop = offset + int(np.searchsorted(times, cutoff, side="left"))
         start = max(offset, stop - self.max_len)
-        return self._slice(start, stop, int(subject_id))
+        return self._slice(start, stop, int(subject_id), at_end=True)
 
 
 def _to_minutes(end_time: dt.datetime | np.datetime64 | int) -> int:
@@ -214,4 +221,6 @@ def collate_events(batch: Sequence[Mapping[str, torch.Tensor]]) -> dict[str, tor
     out["length"] = lengths
     out["subject_id"] = torch.stack([item["subject_id"] for item in batch])
     out["start"] = torch.stack([item["start"] for item in batch])
+    if all("at_end" in item for item in batch):
+        out["at_end"] = torch.stack([item["at_end"] for item in batch])
     return out

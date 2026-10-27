@@ -55,7 +55,7 @@ from ehrjepa.eval.baselines import LOGISTIC_GRID, FittedModel, fit_logistic
 from ehrjepa.eval.history import HistoryReader, anchor_minutes
 from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, EHRJEPAConfig
-from ehrjepa.models.latent import LATENT_MODELS
+from ehrjepa.models.registry import model_class
 from ehrjepa.utils.runtime import resolve_device
 
 __all__ = [
@@ -150,7 +150,7 @@ def load_encoder(
     # Which class the checkpoint's objective implies. Everything a probe touches
     # -- ``embed_batch``, ``encoder`` -- is common to all four, but the heads and
     # the predictor are not, and ``load_state_dict`` is strict.
-    builder = {"ar": EHRAR, **LATENT_MODELS}.get(kind, EHRJEPA)
+    builder = model_class(kind)
     model: EHRJEPA | EHRAR = builder(config)
     if state is not None and not random_init:
         model.load_state_dict(state)

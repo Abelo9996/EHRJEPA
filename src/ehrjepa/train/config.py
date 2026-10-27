@@ -193,6 +193,12 @@ class PretrainConfig:
         values["build_predictor"] = not latent
         values["horizons"] = list(self.objective.horizons)
         values["window_horizons"] = list(self.objective.window_horizons)
+        if self.objective.kind == "state":
+            values["state_horizons"] = list(self.objective.state_horizons)
+            values["state_window_minutes"] = max(1, round(self.objective.state_window_hours * 60))
+            values["state_anchor"] = self.objective.state_anchor
+            values["state_pool"] = self.objective.state_pool
+            values["state_actions"] = self.objective.state_actions
         # ``code_init: text`` names one table per (cache, width) and there is
         # exactly one sensible place for it, so a grid cell says
         # ``model.code_init: text`` and nothing else. An explicit
