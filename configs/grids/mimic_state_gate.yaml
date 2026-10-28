@@ -12,14 +12,15 @@
 #   hybrid_s0 / ar_s0   REUSE runs/mimic-full-1b/*_s0/final.pt (re-scored here, same anchors)
 #   state_ac_s*         AR (lambda_recon 0.1) + state loss (lambda_pred 1.0): the hybrid's two
 #                       weights, with the token-level next-latent target replaced by the
-#                       next-window state target. 24h calendar windows, last-obs-token pooling,
+#                       next-window state target. 4h calendar windows (k=1,2,4 = 4h/8h/16h ahead), last-obs-token pooling,
 #                       horizons [1, 2, 4] windows, EMA target, SIGReg 0.05 (as the hybrid).
 #   state_blind_s*      identical, predictor's action input zeroed (objective.state_actions: false)
 #   mlm_s*              bidirectional masked-code prediction, 15% (80/10/10), same encoder size
 #   hybrid_s1 / ar_s1   trained here: no full-MIMIC seed-1 checkpoint exists yet
 #
-# BEFORE LAUNCH on the PC (cheap, CPU, ~1 min): check that 24h windows give enough state pairs
-# per 512-event crop on the full cache (on the ICU-only demo, median = 1 window per crop):
+# Window length: 4h, chosen from the full-MIMIC stats run on the PC (2026-10-28): at 4h, 94% of
+# 512-event crops have a k=1 state pair, ~11.5 events/window (24h left too few pairs per crop).
+# Re-check with (cheap, CPU, ~1 min):
 #   .venv/bin/python -m ehrjepa.data.actions stats --cache data/cache/mimic-iv-full \
 #     --window-hours 24 8 4 --codes-file configs/actions/mimic_icu_action_items.txt
 # and after each state cell, the held-out action-sensitivity diagnostic:
@@ -46,11 +47,11 @@ control_runs: []
 runs:
   - {name: hybrid_s0, reuse_checkpoint: runs/mimic-full-1b/hybrid_s0/final.pt}
   - {name: ar_s0, reuse_checkpoint: runs/mimic-full-1b/ar_s0/final.pt}
-  - {name: state_ac_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 24, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
-  - {name: state_blind_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 24, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: state_ac_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: state_blind_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
   - {name: mlm_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: mlm, model.causal: false, objective.mlm_prob: 0.15, run.seed: 0}}
-  - {name: state_ac_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 24, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
-  - {name: state_blind_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 24, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: state_ac_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: state_blind_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
   - {name: mlm_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: mlm, model.causal: false, objective.mlm_prob: 0.15, run.seed: 1}}
   - {name: hybrid_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
   - {name: ar_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
