@@ -1,0 +1,57 @@
+# GATE for the action-conditioned patient-state world model (objective.kind: state).
+# Question: does predicting the next *patient state* given the intervening *clinical actions*
+# beat the token-level hybrid, AR, and a bidirectional MLM (Imperial 2610.29528's baseline)
+# under fine-tuning, and does the action input matter (state_ac vs state_blind)?
+#
+# Settings mirror mimic_full_1b + mimic_ft_full: pretrain on the full MIMIC-IV cache
+# (data.cache_dir override, 8% tokenizer fit), 1B nominal tokens (30,518 steps x 64 x 512),
+# ~10.3M trainable params (6L x 256), scored on the 8% source (3,038 held-out subjects, GBM
+# 0.808 / LR 0.795 reused) with BOTH the frozen probe and end-to-end fine-tuning (5 epochs).
+#
+# Cells (seed 0 first, so the gate can be read after ~half the grid):
+#   hybrid_s0 / ar_s0   REUSE runs/mimic-full-1b/*_s0/final.pt (re-scored here, same anchors)
+#   state_ac_s*         AR (lambda_recon 0.1) + state loss (lambda_pred 1.0): the hybrid's two
+#                       weights, with the token-level next-latent target replaced by the
+#                       next-window state target. 4h calendar windows (k=1,2,4 = 4h/8h/16h ahead), last-obs-token pooling,
+#                       horizons [1, 2, 4] windows, EMA target, SIGReg 0.05 (as the hybrid).
+#   state_blind_s*      identical, predictor's action input zeroed (objective.state_actions: false)
+#   mlm_s*              bidirectional masked-code prediction, 15% (80/10/10), same encoder size
+#   hybrid_s1 / ar_s1   trained here: no full-MIMIC seed-1 checkpoint exists yet
+#
+# Window length: 4h, chosen from the full-MIMIC stats run on the PC (2026-10-28): at 4h, 94% of
+# 512-event crops have a k=1 state pair, ~11.5 events/window (24h left too few pairs per crop).
+# Re-check with (cheap, CPU, ~1 min):
+#   .venv/bin/python -m ehrjepa.data.actions stats --cache data/cache/mimic-iv-full \
+#     --window-hours 24 8 4 --codes-file configs/actions/mimic_icu_action_items.txt
+# and after each state cell, the held-out action-sensitivity diagnostic:
+#   .venv/bin/python -m ehrjepa.eval.state_sensitivity --checkpoint runs/mimic-state-gate/<cell>/final.pt \
+#     --cache data/cache/mimic-iv --out docs/experiments/mimic-state-gate/sensitivity/<cell>.json
+name: mimic-state-gate
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 1000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+eval_modes: [probe, finetune]
+ft_epochs: 5
+ft_balanced: false
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_s0, reuse_checkpoint: runs/mimic-full-1b/hybrid_s0/final.pt}
+  - {name: ar_s0, reuse_checkpoint: runs/mimic-full-1b/ar_s0/final.pt}
+  - {name: state_ac_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: state_blind_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: mlm_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: mlm, model.causal: false, objective.mlm_prob: 0.15, run.seed: 0}}
+  - {name: state_ac_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: true, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: state_blind_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: state, model.causal: true, model.target_mode: ema, objective.state_horizons: [1, 2, 4], objective.state_window_hours: 4, objective.state_anchor: calendar, objective.state_pool: last, objective.state_actions: false, objective.action_codes_file: configs/actions/mimic_icu_action_items.txt, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: mlm_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: mlm, model.causal: false, objective.mlm_prob: 0.15, run.seed: 1}}
+  - {name: hybrid_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: ar_s1, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}

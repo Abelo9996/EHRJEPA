@@ -1,0 +1,24 @@
+# Seed-0 extension to 2B tokens: AR vs hybrid, seed 0 only, on the ~30k MIMIC cache.
+# Extends the 300M->1B curve to a third point (300M, 1B, 2B) for seed 0, to see
+# whether the hybrid-over-AR gap keeps growing with scale (1B seed-0: hybrid 0.7983
+# vs ar 0.7716, +0.027). FRESH run, not a continuation: the LR schedule is stretched
+# over the full 2B (cosine decay to min at ~61k steps), so this is a new training run,
+# not a resume of the 1B seed-0 checkpoint. Single-seed trajectory, not error bars;
+# seeds 1,2 at 1B (mimic-scale-1b) remain resumable for the defensible version.
+# Same sigreg 0.05 and objective config as the 300M/1B seed-0 points for a clean curve.
+name: mimic-scale-2b
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 2000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0]
+runs:
+  - {name: ar_s0, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: hybrid_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}

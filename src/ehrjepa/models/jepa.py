@@ -202,6 +202,15 @@ class EHRJEPAConfig:
     #: ``objective.window_horizons``: the horizons in days ``window`` pools over,
     #: one learned horizon embedding row each.
     window_horizons: list[float] = field(default_factory=lambda: [30.0, 365.0])
+    #: ``objective.kind: state`` (:mod:`ehrjepa.models.state`), folded in from the
+    #: objective section so a checkpoint rebuilds the same predictor. Unused by
+    #: every other model, and absent from older checkpoints, which then load with
+    #: these defaults.
+    state_horizons: list[int] = field(default_factory=lambda: [1, 2, 4])
+    state_window_minutes: int = 1440
+    state_anchor: str = "calendar"
+    state_pool: str = "last"
+    state_actions: bool = True
 
     def __post_init__(self) -> None:
         if self.target_mode not in TARGET_MODES:

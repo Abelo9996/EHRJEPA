@@ -1,0 +1,24 @@
+# MIMIC-IV gating re-validation: hybrid vs AR at 300M tokens, 3 seeds.
+# Step 1 of the MIMIC re-validation plan: does the hybrid-vs-AR effect clear
+# seed noise at a larger budget than the within-noise 20M/100M runs? Same ~30k
+# cache, same 7 tasks. Gate: mean-of-6 Delta must exceed the 3-seed spread.
+name: mimic-hybrid-ar-300m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 300000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0]
+runs:
+  - {name: ar_s0,     overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: hybrid_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1,4,16], objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.0, run.seed: 0}}
+  - {name: ar_s1,     overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
+  - {name: hybrid_s1, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1,4,16], objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.0, run.seed: 1}}
+  - {name: ar_s2,     overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 2}}
+  - {name: hybrid_s2, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1,4,16], objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.0, run.seed: 2}}

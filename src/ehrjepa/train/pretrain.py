@@ -43,7 +43,8 @@ from ehrjepa.data.dataset import EventSequenceDataset, collate_events
 from ehrjepa.data.masking import sample_anchors, sample_masks
 from ehrjepa.models.ar import EHRAR
 from ehrjepa.models.jepa import EHRJEPA, JEPAOutput, ema_momentum
-from ehrjepa.models.latent import LATENT_MODELS
+from ehrjepa.models.mlm import EHRMLM, mlm_inputs
+from ehrjepa.models.registry import model_class
 from ehrjepa.objectives.ar import ARObjective
 from ehrjepa.objectives.latent import LatentObjective
 from ehrjepa.objectives.loss import LATENT_KINDS, JEPAObjective, collapse_diagnostics
@@ -95,6 +96,15 @@ LOG_COLUMNS = (
     # Fraction of a window's events the LM stack's token cap kept
     # (``model.encoder: lm`` only; 1.0 whenever nothing was truncated).
     "lm_events_kept",
+    # ``objective.kind: state``: scored (t, t+k) state pairs per micro-batch, the
+    # share of valid tokens that are actions, and the in-batch action
+    # sensitivity -- loss under rolled minus true actions (``act_gain``, > 0
+    # means the predictor uses the actions) and the relative change in the
+    # prediction (``act_delta``). NaN under ``state_actions: false``.
+    "state_pairs",
+    "action_frac",
+    "act_gain",
+    "act_delta",
 )
 
 
@@ -208,13 +218,26 @@ class Trainer:
                     flush=True,
                 )
                 self.model_config.causal = True
-            self.model = LATENT_MODELS[self.kind](self.model_config).to(self.device)
+            self.model = model_class(self.kind)(self.model_config).to(self.device)
+            if self.kind == "state":
+                self._install_code_tables()
             self.objective = LatentObjective(
                 config.objective,
                 recon_head=self.model.recon_head,
                 value_head=self.model.value_head,
                 recon_value_head=self.model.recon_value_head,
             ).to(self.device)
+        elif self.kind == "mlm":
+            if self.model_config.causal:
+                # Masked-code prediction is defined against bidirectional
+                # attention; a causal encoder could not see the right context.
+                print(
+                    "[note] objective.kind=mlm implies model.causal=false; disabling it",
+                    flush=True,
+                )
+                self.model_config.causal = False
+            self.model = EHRMLM(self.model_config).to(self.device)
+            self.objective = ARObjective(chunk=config.objective.ar_chunk).to(self.device)
         else:
             self.model = EHRJEPA(self.model_config).to(self.device)
             self.objective = JEPAObjective(
@@ -253,6 +276,28 @@ class Trainer:
         self._peak_memory = 0
 
     # ------------------------------------------------------------------ #
+
+    def _install_code_tables(self) -> None:
+        """Fill the state model's action/admission tables from the cache vocabulary."""
+        from ehrjepa.data.actions import DEFAULT_ADMISSION_PREFIXES, code_flags
+
+        objective = self.config.objective
+        codes = self.dataset.vocab.codes
+        action = code_flags(
+            codes, objective.action_prefixes, objective.action_patterns, objective.action_codes_file
+        )
+        admission = code_flags(codes, DEFAULT_ADMISSION_PREFIXES)
+        self.model.set_code_tables(torch.from_numpy(action), torch.from_numpy(admission))
+        head = self.dataset._arrays["code_id"][: 20_000_000]
+        share = float(action[head].mean()) if len(head) else 0.0
+        print(
+            f"[state] {int(action.sum()):,} of {len(codes):,} codes are actions; action token "
+            f"share {share:.4f} over the first {len(head):,} {self.config.data.split} events; "
+            f"window {objective.state_window_hours:g}h/{objective.state_anchor}, "
+            f"pool {objective.state_pool}, horizons {objective.state_horizons}, "
+            f"actions {'on' if objective.state_actions else 'OFF (action_blind)'}",
+            flush=True,
+        )
 
     def data_loader(self, start_batch: int) -> DataLoader:
         """A loader whose batch stream starts at global batch ``start_batch``."""
@@ -346,6 +391,16 @@ class Trainer:
     # ------------------------------------------------------------------ #
 
     def _forward(self, batch: dict[str, Tensor]) -> tuple[dict[str, Tensor], object]:
+        if self.kind == "mlm":
+            inputs = mlm_inputs(
+                batch["code_id"],
+                batch["attention_mask"],
+                self.config.objective.mlm_prob,
+                self.model_config.vocab_size,
+                generator=self.mask_generator,
+            )
+            output = self.model(batch, *inputs)
+            return dict(self.objective(self.model.head, output.hidden, output.targets)), output
         if self.kind == "ar":
             output = self.model(batch)
             stats = self.objective(
@@ -499,7 +554,7 @@ class Trainer:
             for name, value in row.items():
                 if name != "step" and isinstance(value, (int, float)) and math.isfinite(value):
                     self._writer.add_scalar(f"train/{name}", value, self.step)
-        if self.kind == "ar":
+        if self.kind in ("ar", "mlm"):
             body = "ce {ce:.4f} top1 {top1:.3f} top10 {top10:.3f}"
             if self.config.objective.recon_value:
                 body += " recon_val {recon_value_loss:.4f}"
@@ -509,7 +564,7 @@ class Trainer:
             body = "pred {pred_loss:.4f} sig_tok {sigreg_tokens:.4f} sig_cls {sigreg_cls:.4f}"
             if self.config.objective.lambda_recon != 0.0:
                 body += " recon {recon_loss:.4f}"
-                if self.kind == "nextlatent":
+                if self.kind in ("nextlatent", "state"):
                     body += " top1 {top1:.3f}"
                 elif self.kind == "window":
                     body += " pos {positives_per_anchor:.1f}"
@@ -519,6 +574,8 @@ class Trainer:
                 body += " val {value_loss:.4f}"
             if self.kind == "window":
                 body += " skip {skipped_frac:.3f}"
+            if self.kind == "state":
+                body += " pairs {state_pairs:.0f} act {action_frac:.3f} again {act_gain:+.4f}"
         print(
             (
                 "step {step:>6} loss {loss:.4f} " + body + " rank {effective_rank:.1f} "

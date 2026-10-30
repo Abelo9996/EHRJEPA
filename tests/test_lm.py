@@ -363,7 +363,8 @@ def test_three_steps_of_hybrid_training_with_an_lm_encoder(tmp_path: Path) -> No
     assert final["value_loss"] > 0
     assert final["lm_events_kept"] == pytest.approx(1.0)
     header = (tmp_path / "metrics.csv").read_text().splitlines()[0]
-    assert header.endswith("value_loss,lm_events_kept")
+    # Later columns (the state objective's) are appended after these two.
+    assert "value_loss,lm_events_kept" in header
     assert (tmp_path / "final.pt").exists()
 
 

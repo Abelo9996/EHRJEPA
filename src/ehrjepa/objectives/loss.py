@@ -58,6 +58,11 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ehrjepa.data.actions import (
+    DEFAULT_ACTION_PATTERNS,
+    DEFAULT_ACTION_PREFIXES,
+    WINDOW_ANCHORS,
+)
 from ehrjepa.data.masking import DEFAULT_N_ANCHORS
 from ehrjepa.models.jepa import JEPAOutput
 from ehrjepa.objectives.ar import ar_loss_chunked
@@ -123,13 +128,13 @@ def jepa_loss(predictions: Tensor, targets: Tensor, beta: float = 1.0) -> Tensor
     return F.smooth_l1_loss(predictions.float(), normed, beta=beta, reduction="mean")
 
 
-OBJECTIVE_KINDS = ("jepa", "ar", "nextlatent", "window")
+OBJECTIVE_KINDS = ("jepa", "ar", "nextlatent", "window", "state", "mlm")
 
 #: The two causal latent objectives, whose loss lives in
 #: :mod:`ehrjepa.objectives.latent` and whose models live in
 #: :mod:`ehrjepa.models.latent`. They share every field below except that
 #: ``lambda_recon`` names a different auxiliary term for each.
-LATENT_KINDS = ("nextlatent", "window")
+LATENT_KINDS = ("nextlatent", "window", "state")
 
 
 @dataclass
@@ -143,7 +148,11 @@ class ObjectiveConfig:
     (pooled future-window latent prediction). The last two are described in
     :mod:`ehrjepa.models.latent`; they read the ``lambda_*`` and ``sigreg_*``
     fields plus their own ``horizons``/``window_horizons``/``window_anchors``,
-    and ignore the masking section entirely.
+    and ignore the masking section entirely. ``"state"`` is the action-conditioned
+    patient-state objective (:mod:`ehrjepa.models.state`; ``state_*`` and
+    ``action_*`` fields, loss through :class:`~ehrjepa.objectives.latent.LatentObjective`)
+    and ``"mlm"`` the bidirectional masked-code baseline (:mod:`ehrjepa.models.mlm`;
+    ``mlm_prob``, loss through the AR objective's chunked cross-entropy).
     """
 
     kind: str = "jepa"
@@ -183,6 +192,27 @@ class ObjectiveConfig:
     #: ``window``: anchors drawn per window (``K``).
     window_anchors: int = DEFAULT_N_ANCHORS
 
+    #: ``mlm``: fraction of a window's events selected for masked-code prediction.
+    mlm_prob: float = 0.15
+
+    #: ``state`` (:mod:`ehrjepa.models.state`): horizons in *windows*.
+    state_horizons: list[int] = field(default_factory=lambda: [1, 2, 4])
+    #: ``state``: window length in hours (24 = a day).
+    state_window_hours: float = 24.0
+    #: ``state``: ``calendar`` (floor of absolute time) or ``admission`` (counted
+    #: from the latest admission event; with 24 h, "admission day").
+    state_anchor: str = "calendar"
+    #: ``state``: ``last`` observation token, ``mean``, or learned ``attn``.
+    state_pool: str = "last"
+    #: ``state``: give the predictor the intervening actions. ``false`` is the
+    #: ``action_blind`` ablation (action input zeroed, nothing else changed).
+    state_actions: bool = True
+    #: ``state``: which codes are actions (see :mod:`ehrjepa.data.actions`).
+    action_prefixes: list[str] = field(default_factory=lambda: list(DEFAULT_ACTION_PREFIXES))
+    action_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_ACTION_PATTERNS))
+    #: ``state``: optional file of extra action codes, one per line.
+    action_codes_file: str | None = None
+
     def __post_init__(self) -> None:
         if self.kind not in OBJECTIVE_KINDS:
             raise ValueError(f"objective.kind must be one of {OBJECTIVE_KINDS}, got {self.kind!r}")
@@ -191,6 +221,15 @@ class ObjectiveConfig:
         # `yaml.safe_dump` in the checkpoint and fail there instead of here.
         self.horizons = [int(k) for k in self.horizons]
         self.window_horizons = [float(h) for h in self.window_horizons]
+        self.state_horizons = [int(k) for k in self.state_horizons]
+        self.action_prefixes = [str(x) for x in self.action_prefixes]
+        self.action_patterns = [str(x) for x in self.action_patterns]
+        if self.state_anchor not in WINDOW_ANCHORS:
+            raise ValueError(
+                f"objective.state_anchor must be one of {WINDOW_ANCHORS}, got {self.state_anchor!r}"
+            )
+        if self.state_window_hours <= 0:
+            raise ValueError("objective.state_window_hours must be positive")
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> ObjectiveConfig:

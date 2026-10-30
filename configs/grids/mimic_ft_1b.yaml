@@ -1,0 +1,60 @@
+# Fine-tuning test on MIMIC: is the frozen linear probe what keeps us below GBM?
+#
+# Every MIMIC number so far is a logistic probe on a frozen 256-d encoder. Two
+# results point at that readout as the bottleneck: (1) a linear model on raw code
+# counts (lr) beats the hybrid probe on both the 8% and the 25% cohort, and (2)
+# pretraining hybrid on 3x more patients did not move its probe score on fixed
+# labels (Eval-A, docs/experiments/mimic-data25-1b). This grid fine-tunes the same
+# checkpoints end to end on each task and scores them on the 8% source, i.e. the
+# same 3,038 held-out subjects, the same labels, and the same lr/gbm (0.795/0.808
+# mean-of-6) as mimic-scale-1b and Eval-A.
+#
+# Nothing is pretrained here: every cell names `reuse_checkpoint:`.
+#   ar_8pct_s0 / hybrid_8pct_s0   -- mimic-scale-1b seed 0 (pretrained on 8%)
+#   ar_25pct_s0 / hybrid_25pct_s0 -- mimic-data25-1b seed 0 (pretrained on 25%,
+#                                    same tokenizer via --reuse-fit-from)
+# `control_runs: [ar_8pct_s0]` adds `ft_random`: the same 6L/256d causal encoder
+# from random init, fine-tuned identically -- the control for "does pretraining
+# help at all once the encoder is trained on the task". (A fine-tune freezes every
+# pretraining head and the EMA target, so the ar and nextlatent cells share one
+# from-scratch twin; see configs/grids/a2ft_physionet2019.yaml.)
+#
+# Settings copied from the a2ft grids: ft_epochs 5 with early stopping on tuning
+# AUROC (patience 2), fixed optimizer recipe in src/ehrjepa/eval/finetune.py,
+# ft_balanced false (the probe and gbm are unweighted too). Seed 0 only; a seed-1
+# repeat is a separate grid if the ordering is close.
+#
+# Cost: ~9k train anchors per task -> ~140 steps/epoch at batch 64, <=5 epochs x 7
+# tasks ~ 5k steps per cell (~45 min at pretraining speed); 5 cells ~ 3-4 h.
+
+name: mimic-ft-1b
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 0
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+
+reuse_predictions: null
+reuse_models: [lr, gbm]
+control_models: [random_init]
+control_runs: [ar_8pct_s0]
+
+runs:
+  - name: ar_8pct_s0
+    reuse_checkpoint: runs/mimic-scale-1b/ar_s0/final.pt
+  - name: hybrid_8pct_s0
+    reuse_checkpoint: runs/mimic-scale-1b/hybrid_s0/final.pt
+  - name: ar_25pct_s0
+    reuse_checkpoint: runs/mimic-data25-1b/ar_s0/final.pt
+  - name: hybrid_25pct_s0
+    reuse_checkpoint: runs/mimic-data25-1b/hybrid_s0/final.pt
