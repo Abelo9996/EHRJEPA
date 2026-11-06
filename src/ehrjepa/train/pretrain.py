@@ -288,13 +288,14 @@ class Trainer:
         )
         admission = code_flags(codes, DEFAULT_ADMISSION_PREFIXES)
         self.model.set_code_tables(torch.from_numpy(action), torch.from_numpy(admission))
-        head = self.dataset._arrays["code_id"][: 20_000_000]
+        head = self.dataset._arrays["code_id"][:20_000_000]
         share = float(action[head].mean()) if len(head) else 0.0
         print(
             f"[state] {int(action.sum()):,} of {len(codes):,} codes are actions; action token "
             f"share {share:.4f} over the first {len(head):,} {self.config.data.split} events; "
             f"window {objective.state_window_hours:g}h/{objective.state_anchor}, "
             f"pool {objective.state_pool}, horizons {objective.state_horizons}, "
+            f"targets {objective.state_target_view}, horizon mode {objective.state_horizon_mode}, "
             f"actions {'on' if objective.state_actions else 'OFF (action_blind)'}",
             flush=True,
         )
@@ -370,6 +371,15 @@ class Trainer:
         exactly where they stopped.
         """
         state = torch.load(path, map_location=self.device, weights_only=False)
+        if self.kind == "state":
+            for name, default in (("state_target_view", "all"), ("state_horizon_mode", "occupied")):
+                saved = state.get("model_config", {}).get(name, default)
+                current = getattr(self.model_config, name)
+                if saved != current:
+                    raise ValueError(
+                        f"cannot resume {name}={saved!r} as {current!r}; "
+                        "start a separate ablation run"
+                    )
         self.model.load_state_dict(state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
         self.step = int(state["step"])

@@ -199,6 +199,8 @@ class PretrainConfig:
             values["state_anchor"] = self.objective.state_anchor
             values["state_pool"] = self.objective.state_pool
             values["state_actions"] = self.objective.state_actions
+            values["state_target_view"] = self.objective.state_target_view
+            values["state_horizon_mode"] = self.objective.state_horizon_mode
         # ``code_init: text`` names one table per (cache, width) and there is
         # exactly one sensible place for it, so a grid cell says
         # ``model.code_init: text`` and nothing else. An explicit

@@ -35,6 +35,7 @@ from ehrjepa.data.dataset import EventSequenceDataset, collate_events
 from ehrjepa.data.tokenize import MASK_ID
 from ehrjepa.eval import probe
 from ehrjepa.eval.finetune import build_model
+from ehrjepa.eval.state_integrity import calendar_horizons, perturb_content, target_integrity
 from ehrjepa.eval.state_sensitivity import action_sensitivity
 from ehrjepa.models.jepa import EHRJEPAConfig
 from ehrjepa.models.mlm import EHRMLM, mlm_inputs
@@ -306,8 +307,11 @@ def test_ema_targets_carry_no_gradient_and_the_attention_pool_follows_the_online
 
 
 @pytest.mark.parametrize("actions", [True, False])
-def test_state_loss_is_finite_with_ar_and_sigreg_and_backward_runs(actions: bool) -> None:
-    model = _model(target_mode="ema", state_actions=actions).train()
+@pytest.mark.parametrize("view", ["all", "observations"])
+def test_state_loss_is_finite_with_ar_and_sigreg_and_backward_runs(
+    actions: bool, view: str
+) -> None:
+    model = _model(target_mode="ema", state_actions=actions, state_target_view=view).train()
     objective = LatentObjective(
         ObjectiveConfig(kind="state", lambda_recon=0.1, lambda_sigreg=0.05, sigreg_directions=16),
         recon_head=model.recon_head,
@@ -410,16 +414,17 @@ def test_dataset_items_say_whether_they_reach_the_subjects_last_event() -> None:
 
 
 @requires_cache
-@pytest.mark.parametrize("kind", ["state", "mlm"])
+@pytest.mark.parametrize("kind", ["state", "state_observations", "mlm"])
 def test_trainer_runs_and_the_probe_reloads_the_checkpoint(tmp_path: Path, kind: str) -> None:
+    objective_kind = "state" if kind.startswith("state") else kind
     overrides = [
-        f"objective.kind={kind}",
+        f"objective.kind={objective_kind}",
         "run.steps=4",
         "run.log_every=2",
         f"run.out_dir={tmp_path / kind}",
         "data.max_len=128",
     ]
-    if kind == "state":
+    if objective_kind == "state":
         overrides += [
             "model.causal=true",
             "model.target_mode=ema",
@@ -428,6 +433,11 @@ def test_trainer_runs_and_the_probe_reloads_the_checkpoint(tmp_path: Path, kind:
             "objective.state_window_hours=4",
             f"objective.action_codes_file={ITEMS}",
         ]
+        if kind == "state_observations":
+            overrides += [
+                "objective.state_target_view=observations",
+                "objective.state_horizon_mode=calendar",
+            ]
     else:
         overrides += ["model.causal=false"]
     trainer = Trainer(load_config(DEBUG_CONFIG, overrides))
@@ -436,8 +446,13 @@ def test_trainer_runs_and_the_probe_reloads_the_checkpoint(tmp_path: Path, kind:
     header = (tmp_path / kind / "metrics.csv").read_text().splitlines()[0].split(",")
     assert header == list(LOG_COLUMNS)
     model, _ = probe.load_encoder(tmp_path / kind / "final.pt")
-    if kind == "state":
+    if objective_kind == "state":
         assert isinstance(model, EHRStateModel)
+        expected_view = "observations" if kind == "state_observations" else "all"
+        assert model.config.state_target_view == expected_view
+        assert model.config.state_horizon_mode == (
+            "calendar" if kind == "state_observations" else "occupied"
+        )
         assert torch.equal(model.action_table, trainer.model.action_table.cpu())
         assert int(model.action_table.sum()) > 100
         rows = (tmp_path / kind / "metrics.csv").read_text().splitlines()[1:]
@@ -448,6 +463,165 @@ def test_trainer_runs_and_the_probe_reloads_the_checkpoint(tmp_path: Path, kind:
     tuned, _ = build_model(tmp_path / kind / "final.pt", features="last")
     batch = collate_events([trainer.dataset[0], trainer.dataset[1]])
     assert tuned(batch).shape == (2,)
+
+
+@pytest.mark.parametrize("target_mode", ["shared", "ema"])
+@pytest.mark.parametrize("pool", ["last", "mean", "attn"])
+def test_observation_targets_remove_action_content_echo(target_mode: str, pool: str) -> None:
+    batch = _batch()
+    positions = [p for w in range(N_WINDOWS) for p in _positions(w, "act")]
+    changed = _tamper(batch, positions, action=True)
+    for view in ("all", "observations"):
+        model = _model(
+            target_mode=target_mode, state_pool=pool, state_target_view=view, state_actions=False
+        )
+        with torch.no_grad():
+            before = model.build_pairs(batch).targets
+            after = model.build_pairs(changed).targets
+        assert before is not None and after is not None
+        if view == "observations":
+            torch.testing.assert_close(before, after, atol=0, rtol=0)
+        else:
+            assert not torch.allclose(before, after)
+
+
+@pytest.mark.parametrize("time_features", [False, True])
+def test_observation_target_ignores_action_count_positions_and_cached_deltas(time_features):
+    model = _model(state_target_view="observations", target_time_features=time_features)
+    batch = _batch()
+    obs = ~model.action_table[batch["code_id"]]
+    keep = obs[0].nonzero(as_tuple=True)[0]
+    removed = {k: v[:, keep] if v.ndim == 2 else v for k, v in batch.items()}
+    # These gaps originally included action events. The target must recompute
+    # them, not trust either cache's arbitrary supplied values.
+    removed["log_delta"] = torch.full_like(removed["log_delta"], 100.0)
+    full = model.state_target_tokens(batch, model.embed_batch(batch), obs)
+    compact = model.state_target_tokens(
+        removed, model.embed_batch(removed), removed["attention_mask"].bool()
+    )
+    torch.testing.assert_close(full[:, keep], compact, atol=0, rtol=0)
+    assert not full.requires_grad and not compact.requires_grad
+    # Positive control: retaining observation content must still matter.
+    changed = _tamper(batch, _positions(1, "obs"), action=False)
+    different = model.state_target_tokens(changed, model.embed_batch(changed), obs)
+    assert not torch.allclose(full[:, keep], different[:, keep])
+
+
+def test_observation_target_handles_all_action_and_all_padding_rows():
+    model = _model(state_target_view="observations", target_mode="ema")
+    batch = _batch()
+    batch["code_id"][:] = ACTION_LO
+    batch["attention_mask"][1] = 0
+    pairs = model.build_pairs(batch)
+    assert pairs.targets is not None
+    assert torch.isfinite(pairs.targets).all()
+    assert torch.count_nonzero(pairs.targets) == 0
+    assert all(r.numel() == 0 for r in pairs.rows)
+
+
+def test_target_view_must_be_explicitly_valid():
+    with pytest.raises(ValueError, match="state_target_view"):
+        _model(state_target_view="observation_typo")
+    with pytest.raises(ValueError, match="state_target_view"):
+        load_config(DEBUG_CONFIG, ["objective.state_target_view=observation_typo"])
+
+
+def test_integrity_audit_uses_paired_roles_and_detects_legacy_echo():
+    model = _model()
+    batch = _batch()
+    changed = perturb_content(batch, model, actions=True)
+    obs = ~model.action_table[batch["code_id"]]
+    for key in ("code_id", "value_bin", "value_z"):
+        torch.testing.assert_close(batch[key][obs], changed[key][obs], atol=0, rtol=0)
+    torch.testing.assert_close(batch["time_min"], changed["time_min"], atol=0, rtol=0)
+    assert torch.equal(model.action_table[batch["code_id"]], model.action_table[changed["code_id"]])
+    result = target_integrity(model, [batch])
+    assert result["status"] == "passed"
+    assert result["views"]["all"]["mean_relative_target_change_actions"] > 0
+    assert result["views"]["observations"]["max_absolute_target_change_actions"] == 0
+    assert model.config.state_target_view == "all"  # the audit must not mutate its model
+
+
+def test_integrity_audit_without_actions_is_inconclusive():
+    model = _model()
+    batch = _batch()
+    batch["code_id"][:] = 5
+    assert target_integrity(model, [batch])["status"] == "inconclusive"
+
+
+def test_calendar_audit_finds_compressed_gaps_without_large_empty_window_allocation():
+    model = _model(state_horizons=[1])
+    batch = _batch()
+    base = calendar_horizons(model, [batch])["per_horizon"]["1"]
+    assert base["pairs"] == 2 * (N_WINDOWS - 1)
+    assert base["calendar_gap_not_k"] == 0
+    batch["time_min"][:, len(OFFSETS) :] += 10000 * DAY
+    gap = calendar_horizons(model, [batch])["per_horizon"]["1"]
+    assert gap["pairs"] == base["pairs"]
+    assert gap["calendar_gap_not_k"] == 2
+    assert gap["max_calendar_gap"] == 10001
+    model.config.state_horizon_mode = "calendar"
+    exact = calendar_horizons(model, [batch])["per_horizon"]["1"]
+    assert exact["pairs"] == base["pairs"] - 2
+    assert exact["calendar_gap_not_k"] == 0
+    assert exact["max_calendar_gap"] == 1
+
+
+def test_calendar_mode_finds_exact_target_even_when_k_exceeds_occupied_window_count():
+    model = _model(state_horizons=[1, 4], state_horizon_mode="calendar")
+    full = _batch()
+    # Only calendar days 0 and 4 remain; compact target index is 1, not 4.
+    keep = _positions(0, "all") + _positions(4, "all")
+    batch = {key: value[:, keep] if value.ndim == 2 else value for key, value in full.items()}
+    pairs = model.build_pairs(batch)
+    assert pairs.rows[0].numel() == 0
+    assert pairs.cols[1].tolist() == [0, 0]
+    assert pairs.target_cols[1].tolist() == [1, 1]
+    torch.testing.assert_close(pairs.log_dt[1], torch.full((2,), np.log1p(4 * 24)))
+    out = model(batch)
+    assert out.target_index[1].tolist() == [1, 1]
+    torch.testing.assert_close(out.targets, pairs.targets[:, 1])
+    assert action_sensitivity(model, [batch])["per_horizon"]["k4"]["pairs"] == 2
+    batch["at_end"][:] = False
+    assert all(r.numel() == 0 for r in model.build_pairs(batch).rows)
+
+
+def test_calendar_prediction_does_not_read_the_future_observation_time_within_bin():
+    model = _model(state_horizon_mode="calendar", state_horizons=[1])
+    batch = _batch()
+    changed = {k: v.clone() for k, v in batch.items()}
+    changed["time_min"][:, _positions(1, "all")] += 10
+    torch.testing.assert_close(
+        _prediction(model, batch, t=0, k=1), _prediction(model, changed, t=0, k=1), atol=0, rtol=0
+    )
+    with pytest.raises(ValueError, match="requires calendar"):
+        _model(state_horizon_mode="calendar", state_anchor="admission")
+
+
+@requires_cache
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [("state_target_view", "observations"), ("state_horizon_mode", "calendar")],
+)
+def test_resume_rejects_changing_target_semantics_before_loading_weights(tmp_path, setting, value):
+    config = load_config(
+        DEBUG_CONFIG,
+        [
+            "objective.kind=state",
+            f"objective.{setting}={value}",
+            f"run.out_dir={tmp_path / 'observations'}",
+        ],
+    )
+    trainer = Trainer(config)
+    # Legacy checkpoint configs have no view field. Reusing that run with the
+    # new objective must fail before any model/optimizer mutation.
+    old = trainer.state_dict()
+    old["model_config"] = dict(old["model_config"])
+    old["model_config"].pop(setting)
+    path = tmp_path / "legacy.pt"
+    torch.save(old, path)
+    with pytest.raises(ValueError, match="start a separate ablation run"):
+        trainer.load_checkpoint(path)
 
 
 @requires_cache

@@ -130,6 +130,8 @@ def assign_windows(
 
     ``time_min`` is ``(B, L)`` int64 minutes, non-decreasing along each row's valid
     prefix (the cache's canonical order). Invalid positions get window ``-1``.
+    Returned indices compact the nonempty bins. They are storage indices, not
+    elapsed-time offsets; the state model's calendar mode matches absolute bins.
     With ``admission`` (``(B, L)`` bool, true on admission events) windows are
     counted from the latest admission at or before each token's *time*.
     """

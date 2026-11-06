@@ -207,6 +207,10 @@ class ObjectiveConfig:
     #: ``state``: give the predictor the intervening actions. ``false`` is the
     #: ``action_blind`` ablation (action input zeroed, nothing else changed).
     state_actions: bool = True
+    #: ``all`` reproduces legacy targets; ``observations`` removes action tokens
+    #: before the target encoder, including their position/time-gap effects.
+    state_target_view: str = "all"
+    state_horizon_mode: str = "occupied"
     #: ``state``: which codes are actions (see :mod:`ehrjepa.data.actions`).
     action_prefixes: list[str] = field(default_factory=lambda: list(DEFAULT_ACTION_PREFIXES))
     action_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_ACTION_PATTERNS))
@@ -224,6 +228,12 @@ class ObjectiveConfig:
         self.state_horizons = [int(k) for k in self.state_horizons]
         self.action_prefixes = [str(x) for x in self.action_prefixes]
         self.action_patterns = [str(x) for x in self.action_patterns]
+        if self.state_target_view not in ("all", "observations"):
+            raise ValueError("objective.state_target_view must be 'all' or 'observations'")
+        if self.state_horizon_mode not in ("occupied", "calendar"):
+            raise ValueError("objective.state_horizon_mode must be 'occupied' or 'calendar'")
+        if self.state_horizon_mode == "calendar" and self.state_anchor != "calendar":
+            raise ValueError("calendar state_horizon_mode requires calendar state_anchor")
         if self.state_anchor not in WINDOW_ANCHORS:
             raise ValueError(
                 f"objective.state_anchor must be one of {WINDOW_ANCHORS}, got {self.state_anchor!r}"

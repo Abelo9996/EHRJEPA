@@ -1,0 +1,212 @@
+{
+  "created_at": "2026-11-06T18:45:46.865717+00:00",
+  "experiment": "state_target_integrity_v1",
+  "weights": "random_initialization_not_trained",
+  "checkpoint": null,
+  "checkpoint_sha256": null,
+  "cache": "data/cache/mimic-demo",
+  "split": "train",
+  "cache_meta_sha256": "d7a6e18e1c18c328500e75cfdda08750f39d99c17c4deb95a943a7ba0dd7f05e",
+  "vocab_sha256": "a984aad1cb38595284ab94eab562df3581a3f16592ae40c1ae78238e82297443",
+  "codes_file_sha256": "c8c9573f032e76ff483b825a656cb1b71b8cba0389d33412fcb3646de37d7a59",
+  "audit_code_sha256": "192c62233cafcc2242a388ff37d17e4353439a1697d4537ac1cf381d45f75928",
+  "model_code_sha256": "44112bad37fe5f8490470ce2408f8cb723fc05779a6ec3e08ed2d36982e12fd2",
+  "batches_per_seed": 8,
+  "batch_size": 4,
+  "max_len": 512,
+  "results": [
+    {
+      "seed": 0,
+      "target_integrity": {
+        "status": "passed",
+        "views": {
+          "all": {
+            "sampled_observation_windows": 264,
+            "sampled_action_tokens": 424,
+            "mean_relative_target_change_actions": 0.0001736345328743372,
+            "max_absolute_target_change_actions": 0.00736081600189209,
+            "mean_relative_target_change_observations": 0.49960477063150116
+          },
+          "observations": {
+            "sampled_observation_windows": 264,
+            "sampled_action_tokens": 424,
+            "mean_relative_target_change_actions": 0.0,
+            "max_absolute_target_change_actions": 0.0,
+            "mean_relative_target_change_observations": 0.4996338865973733
+          }
+        }
+      },
+      "calendar_horizons": {
+        "status": "mismatch",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 200,
+            "calendar_gap_not_k": 85,
+            "max_calendar_gap": 252
+          },
+          "2": {
+            "pairs": 175,
+            "calendar_gap_not_k": 114,
+            "max_calendar_gap": 408
+          },
+          "4": {
+            "pairs": 152,
+            "calendar_gap_not_k": 132,
+            "max_calendar_gap": 572
+          }
+        }
+      },
+      "exact_calendar_horizons": {
+        "status": "passed",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 115,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 1
+          },
+          "2": {
+            "pairs": 93,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 2
+          },
+          "4": {
+            "pairs": 73,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 4
+          }
+        }
+      }
+    },
+    {
+      "seed": 1,
+      "target_integrity": {
+        "status": "passed",
+        "views": {
+          "all": {
+            "sampled_observation_windows": 194,
+            "sampled_action_tokens": 403,
+            "mean_relative_target_change_actions": 0.0003790308615749644,
+            "max_absolute_target_change_actions": 0.010597809217870235,
+            "mean_relative_target_change_observations": 0.6048579314320358
+          },
+          "observations": {
+            "sampled_observation_windows": 194,
+            "sampled_action_tokens": 403,
+            "mean_relative_target_change_actions": 0.0,
+            "max_absolute_target_change_actions": 0.0,
+            "mean_relative_target_change_observations": 0.6050605429816491
+          }
+        }
+      },
+      "calendar_horizons": {
+        "status": "mismatch",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 130,
+            "calendar_gap_not_k": 38,
+            "max_calendar_gap": 2339
+          },
+          "2": {
+            "pairs": 102,
+            "calendar_gap_not_k": 56,
+            "max_calendar_gap": 2438
+          },
+          "4": {
+            "pairs": 79,
+            "calendar_gap_not_k": 68,
+            "max_calendar_gap": 2528
+          }
+        }
+      },
+      "exact_calendar_horizons": {
+        "status": "passed",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 92,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 1
+          },
+          "2": {
+            "pairs": 64,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 2
+          },
+          "4": {
+            "pairs": 47,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 4
+          }
+        }
+      }
+    },
+    {
+      "seed": 2,
+      "target_integrity": {
+        "status": "passed",
+        "views": {
+          "all": {
+            "sampled_observation_windows": 257,
+            "sampled_action_tokens": 593,
+            "mean_relative_target_change_actions": 0.0005744059320089882,
+            "max_absolute_target_change_actions": 0.008743762969970703,
+            "mean_relative_target_change_observations": 0.6941405752753469
+          },
+          "observations": {
+            "sampled_observation_windows": 257,
+            "sampled_action_tokens": 593,
+            "mean_relative_target_change_actions": 0.0,
+            "max_absolute_target_change_actions": 0.0,
+            "mean_relative_target_change_observations": 0.6938038651581404
+          }
+        }
+      },
+      "calendar_horizons": {
+        "status": "mismatch",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 193,
+            "calendar_gap_not_k": 82,
+            "max_calendar_gap": 2243
+          },
+          "2": {
+            "pairs": 167,
+            "calendar_gap_not_k": 112,
+            "max_calendar_gap": 2244
+          },
+          "4": {
+            "pairs": 141,
+            "calendar_gap_not_k": 129,
+            "max_calendar_gap": 2424
+          }
+        }
+      },
+      "exact_calendar_horizons": {
+        "status": "passed",
+        "window_minutes": 240,
+        "per_horizon": {
+          "1": {
+            "pairs": 111,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 1
+          },
+          "2": {
+            "pairs": 83,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 2
+          },
+          "4": {
+            "pairs": 59,
+            "calendar_gap_not_k": 0,
+            "max_calendar_gap": 4
+          }
+        }
+      }
+    }
+  ],
+  "interpretation": "Structural target dependence only. Not a trained clinical benefit, not an intervention effect, and not a cross-paper finding. Seeds resample crops and (unless using a checkpoint) random weights. The exact-calendar arm skips unobserved target bins; no imputation is performed."
+}

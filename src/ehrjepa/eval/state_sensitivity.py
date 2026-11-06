@@ -18,6 +18,9 @@ same horizon in the batch (a different patient's or window's actions):
 
 An ``action_blind`` checkpoint is identically zero / equal here by construction,
 which is the control the ``state_ac`` row is read against.
+This zeros only the predictor's explicit action vector; the online encoder may
+still see action tokens. Neither sensitivity nor a true-vs-permuted loss gap
+identifies a causal treatment effect. Reports record target/horizon semantics.
 """
 
 from __future__ import annotations
@@ -61,7 +64,7 @@ def action_sensitivity(
             perm = torch.randperm(n, generator=generator).to(action.device)
             true = model.predict(state, action, slot, pairs.log_dt[slot]).float()
             other = model.predict(state, action[perm], slot, pairs.log_dt[slot]).float()
-            target = pairs.targets[r, t + k].float()
+            target = pairs.targets[r, pairs.target_cols[slot]].float()
             normed = F.layer_norm(target, (target.shape[-1],))
             loss_true = F.smooth_l1_loss(true, normed, reduction="none").mean(dim=-1)
             loss_perm = F.smooth_l1_loss(other, normed, reduction="none").mean(dim=-1)
@@ -101,7 +104,14 @@ def action_sensitivity(
         "gain": (total["loss_perm"] - total["loss_true"]) / n,
         "win_rate": total["wins"] / n,
     }
-    return {"actions_on": bool(model.config.state_actions), "pooled": pooled, "per_horizon": per_k}
+    return {
+        "actions_on": bool(model.config.state_actions),
+        "target_view": model.config.state_target_view,
+        "horizon_mode": model.config.state_horizon_mode,
+        "interpretation": "Predictive input sensitivity, not a causal treatment effect.",
+        "pooled": pooled,
+        "per_horizon": per_k,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:

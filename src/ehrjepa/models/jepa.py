@@ -211,6 +211,12 @@ class EHRJEPAConfig:
     state_anchor: str = "calendar"
     state_pool: str = "last"
     state_actions: bool = True
+    #: Preserve legacy checkpoint semantics unless the observation-only target
+    #: ablation is explicitly selected. This changes targets, not online states.
+    state_target_view: str = "all"
+    #: ``occupied`` is the legacy next-nonempty-window rule. ``calendar``
+    #: requires an observation state exactly k calendar bins later.
+    state_horizon_mode: str = "occupied"
 
     def __post_init__(self) -> None:
         if self.target_mode not in TARGET_MODES:

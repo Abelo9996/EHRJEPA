@@ -1,3 +1,6 @@
+# HISTORICAL GRID: do not resume as a corrected world-model experiment.
+# It retains legacy all-token targets and occupied-window horizons for reproducibility.
+# See docs/NEXT_STEPS.md and docs/AUTORESEARCH.md for the current validation gates.
 # GATE for the action-conditioned patient-state world model (objective.kind: state).
 # Question: does predicting the next *patient state* given the intervening *clinical actions*
 # beat the token-level hybrid, AR, and a bidirectional MLM (Imperial 2610.29528's baseline)
@@ -12,7 +15,8 @@
 #   hybrid_s0 / ar_s0   REUSE runs/mimic-full-1b/*_s0/final.pt (re-scored here, same anchors)
 #   state_ac_s*         AR (lambda_recon 0.1) + state loss (lambda_pred 1.0): the hybrid's two
 #                       weights, with the token-level next-latent target replaced by the
-#                       next-window state target. 4h calendar windows (k=1,2,4 = 4h/8h/16h ahead), last-obs-token pooling,
+#                       next-window state target. 4h bins, but k=1,2,4 counts OCCUPIED bins,
+#                       not necessarily 4h/8h/16h; last-observation-token pooling,
 #                       horizons [1, 2, 4] windows, EMA target, SIGReg 0.05 (as the hybrid).
 #   state_blind_s*      identical, predictor's action input zeroed (objective.state_actions: false)
 #   mlm_s*              bidirectional masked-code prediction, 15% (80/10/10), same encoder size

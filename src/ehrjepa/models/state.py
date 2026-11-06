@@ -29,12 +29,24 @@ target
     The same pooling of the *target* stack (EMA copy under ``model.target_mode:
     ema``) over window ``t+k``'s observation tokens, under stop-gradient, scored
     by smooth L1 against its layer norm (the repository's ``jepa_loss``).
+    By default (``state_target_view: all``), those outputs have attended to
+    action tokens too: pooling only observations does not remove action content.
+    ``state_target_view: observations`` compacts observations before the target
+    pass and recomputes time gaps between observations. It removes this direct
+    action echo, but does not change the online state, horizon rule, action input
+    or observational confounding. It is a target ablation, not a causal model.
 
 ``objective.state_actions: false`` is the ``action_blind`` ablation: the action
 vector is replaced by zeros, everything else -- parameters, pairs, targets --
 identical. A pair ``(t, t+k)`` is scored when both windows have a state; the
 last window of a crop is never a target unless the crop ends at the subject's
 last event (``at_end`` in the batch), because the crop may have cut it short.
+
+``state_horizon_mode: calendar`` replaces the legacy occupied-window offsets
+with exact calendar-bin offsets. Missing target bins are skipped, never filled
+with a later observation. Sparse lookup avoids allocating years of empty bins.
+The predictor receives the nominal bin offset, not time to a future event.
+This mode requires calendar anchors; it does not fix the action-plan semantics.
 
 The next-code AR loss rides along exactly as in :class:`EHRNextLatent`
 (``lambda_recon``), so ``loss = lambda_pred * state + lambda_recon * AR`` --
@@ -125,6 +137,7 @@ class StatePairs:
     states: Tensor  # (B, W, D) pooled online states
     rows: list[Tensor]  # per horizon: batch index of each pair
     cols: list[Tensor]  # per horizon: window index t of each pair
+    target_cols: list[Tensor]  # per horizon: compact index of the target window
     act_mean: list[Tensor]  # per horizon: (N, D) mean action content embedding
     act_count: list[Tensor]  # per horizon: (N,) actions in windows t..t+k-1
     log_dt: list[Tensor]  # per horizon: (N,) log1p hours from window t to t+k
@@ -145,6 +158,12 @@ class EHRStateModel(_CausalLatent):
             raise ValueError(f"state_horizons must be positive, got {config.state_horizons}")
         if config.state_window_minutes < 1:
             raise ValueError("state_window_minutes must be >= 1")
+        if config.state_target_view not in ("all", "observations"):
+            raise ValueError("state_target_view must be 'all' or 'observations'")
+        if config.state_horizon_mode not in ("occupied", "calendar"):
+            raise ValueError("state_horizon_mode must be 'occupied' or 'calendar'")
+        if config.state_horizon_mode == "calendar" and config.state_anchor != "calendar":
+            raise ValueError("calendar state_horizon_mode requires calendar state_anchor")
         super().__init__(config)
         dim = config.dim
         self.state_pool = StatePool(dim, config.state_pool)
@@ -204,6 +223,31 @@ class EHRStateModel(_CausalLatent):
             admission = self.admission_table[batch["code_id"]]
         return assign_windows(batch["time_min"], valid, self.config.state_window_minutes, admission)
 
+    @torch.no_grad()
+    def state_target_tokens(
+        self, batch: Mapping[str, Tensor], tokens: Tensor, is_obs: Tensor
+    ) -> Tensor:
+        """Target token outputs, with action-independent positions/gaps if requested.
+
+        A key mask alone still exposes action count via RoPE position and action
+        timing via cached ``log_delta``. Compact before encoding, recompute gaps
+        between retained observations, then scatter back for the existing pool.
+        The first retained observation has gap zero (earlier crop history is
+        unknown). All-action/padded rows are safe and yield no target state.
+        """
+        if self.config.state_target_view == "all":
+            return self.window_targets(batch, tokens)
+        times = batch["time_min"].to(torch.int64)
+        sentinel = torch.iinfo(torch.int64).min
+        previous = torch.where(is_obs, times, sentinel).cummax(dim=1).values.roll(1, dims=1)
+        previous[:, 0] = sentinel
+        # Avoid int64 overflow before subtracting the sentinel.
+        previous = torch.where(previous == sentinel, times, previous)
+        gap_hours = (times - previous).clamp(min=0).float() / 60.0
+        target_batch = dict(batch)
+        target_batch["log_delta"] = torch.log1p(gap_hours).to(batch["log_delta"].dtype)
+        return self._span_targets(target_batch, is_obs).detach()
+
     def build_pairs(self, batch: Mapping[str, Tensor], compute_targets: bool = True) -> StatePairs:
         if "time_min" not in batch:
             raise KeyError("the state objective needs `time_min`; collate the full feature set")
@@ -211,12 +255,11 @@ class EHRStateModel(_CausalLatent):
         valid = effective_valid(tokens, batch["attention_mask"])
         encoded = self.encoder(tokens, valid)
         hidden = encoded.tokens
-        targets_tok = self.window_targets(batch, tokens) if compute_targets else None
-
         window, n_windows = self.windows(batch, valid)
         width = max(1, int(n_windows.max()))
         is_action = self.action_table[batch["code_id"]] & valid
         is_obs = valid & ~is_action
+        targets_tok = self.state_target_tokens(batch, tokens, is_obs) if compute_targets else None
         states = self.state_pool(hidden, window, is_obs, width)
         targets = None
         if targets_tok is not None:
@@ -267,27 +310,39 @@ class EHRStateModel(_CausalLatent):
 
         rows: list[Tensor] = []
         cols: list[Tensor] = []
+        target_cols: list[Tensor] = []
         act_mean: list[Tensor] = []
         act_count: list[Tensor] = []
         log_dt: list[Tensor] = []
+        calendar = torch.div(first, self.config.state_window_minutes, rounding_mode="floor")
         for k in self.config.state_horizons:
-            if k >= width:
-                empty = torch.zeros(0, dtype=torch.long, device=device)
-                rows.append(empty)
-                cols.append(empty)
-                act_mean.append(content.new_zeros(0, dim))
-                act_count.append(torch.zeros(0, device=device))
-                log_dt.append(torch.zeros(0, device=device))
-                continue
-            keep = has_state[:, :-k] & target_ok[:, k:]
-            r, t = keep.nonzero(as_tuple=True)
-            total = prefix[r, t + k] - prefix[r, t]
-            count = prefix_n[r, t + k] - prefix_n[r, t]
+            if self.config.state_horizon_mode == "calendar":
+                wanted = calendar + k
+                found = torch.searchsorted(calendar.contiguous(), wanted.contiguous())
+                candidate = found.clamp(max=width - 1)
+                keep = (
+                    has_state
+                    & (found < n_windows[:, None])
+                    & (calendar.gather(1, candidate) == wanted)
+                    & target_ok.gather(1, candidate)
+                )
+                r, t = keep.nonzero(as_tuple=True)
+                u = found[r, t]
+            else:
+                keep = has_state[:, :-k] & target_ok[:, k:] if k < width else has_state[:, :0]
+                r, t = keep.nonzero(as_tuple=True)
+                u = t + k
+            total = prefix[r, u] - prefix[r, t]
+            count = prefix_n[r, u] - prefix_n[r, t]
             rows.append(r)
             cols.append(t)
+            target_cols.append(u)
             act_mean.append((total / count.clamp(min=1)[:, None]).to(content.dtype))
             act_count.append(count)
-            gap = (first[r, t + k] - last[r, t]).clamp(min=0).float() / 60.0
+            if self.config.state_horizon_mode == "calendar":
+                gap = torch.full_like(count, k * self.config.state_window_minutes / 60.0)
+            else:
+                gap = (first[r, u] - last[r, t]).clamp(min=0).float() / 60.0
             log_dt.append(torch.log1p(gap))
         frac = is_action.sum().float() / valid.sum().clamp(min=1).float()
         return StatePairs(
@@ -298,6 +353,7 @@ class EHRStateModel(_CausalLatent):
             states=states,
             rows=rows,
             cols=cols,
+            target_cols=target_cols,
             act_mean=act_mean,
             act_count=act_count,
             log_dt=log_dt,
@@ -328,13 +384,13 @@ class EHRStateModel(_CausalLatent):
         sizes: list[int] = []
         gains: list[Tensor] = []
         deltas: list[Tensor] = []
-        for slot, k in enumerate(self.config.state_horizons):
+        for slot, _ in enumerate(self.config.state_horizons):
             r, t = pairs.rows[slot], pairs.cols[slot]
             state = pairs.states[r, t]
             action = self.action_vector(pairs.act_mean[slot], pairs.act_count[slot])
             predicted = self.predict(state, action, slot, pairs.log_dt[slot])
             target = (
-                pairs.targets[r, t + k]
+                pairs.targets[r, pairs.target_cols[slot]]
                 if pairs.targets is not None
                 else torch.zeros_like(predicted)
             )
@@ -376,7 +432,7 @@ class EHRStateModel(_CausalLatent):
                 shifted[:, :-1] = batch["value_bin"][:, 1:]
                 extras["recon_value_bin"] = shifted[scored]
         rows = list(pairs.rows)
-        cols = [t + k for t, k in zip(pairs.cols, self.config.state_horizons, strict=True)]
+        cols = pairs.target_cols
         return JEPAOutput(
             predictions=_cat(predictions, hidden),
             targets=_cat(target_rows, hidden),
