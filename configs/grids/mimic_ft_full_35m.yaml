@@ -1,0 +1,22 @@
+# Fine-tune the 35M full-MIMIC hybrid on the 8% source (vs GBM 0.808; 10M full hybrid = 0.822).
+# ft_batch 32: the 35M encoder may not fit 64 fine-tuning windows in 8 GB; check on the card first.
+name: mimic-ft-full-35m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 0
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+eval_modes: [finetune]
+ft_epochs: 5
+ft_balanced: false
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_35m_full_s0, reuse_checkpoint: runs/mimic-full-35m/hybrid_35m_s0/final.pt, ft_batch: 32}

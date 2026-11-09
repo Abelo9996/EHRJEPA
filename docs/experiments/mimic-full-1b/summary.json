@@ -1,0 +1,166 @@
+{
+  "grid": "mimic-full-1b",
+  "base": "configs/pretrain_default.yaml",
+  "runs": [
+    {
+      "run": "hybrid_s0",
+      "mode": "probe",
+      "ft_batch": null,
+      "objective": "nextlatent",
+      "pooling": "last@final",
+      "reuse_checkpoint": null,
+      "target_mode": "ema",
+      "lambda_sigreg": 0.05,
+      "p_future": null,
+      "steps": 30518,
+      "tokens": 1000013824,
+      "batch_size": 64,
+      "max_len": 512,
+      "overrides": {
+        "data.cache_dir": "data/cache/mimic-iv-full",
+        "objective.kind": "nextlatent",
+        "model.causal": true,
+        "model.target_mode": "ema",
+        "objective.horizons": [
+          1,
+          4,
+          16
+        ],
+        "objective.lambda_sigreg": 0.05,
+        "objective.lambda_recon": 0.1,
+        "run.seed": 0
+      },
+      "final": {
+        "step": 30518.0,
+        "loss": 0.24466171860694885,
+        "pred_loss": 0.14132776856422424,
+        "sigreg_tokens": 0.0049780891276896,
+        "sigreg_cls": 0.008454052731394768,
+        "recon_loss": 1.0266234874725342,
+        "recon_value_loss": 0.0,
+        "ce": 1.0266234874725342,
+        "top1": 0.7677914500236511,
+        "top10": 0.9285637140274048,
+        "lr": 3.0000007920177064e-06,
+        "grad_norm": 0.07388850301504135,
+        "tokens_per_s": 43401.09249175008,
+        "mean_std": 1.0152959823608398,
+        "effective_rank": 211.43711853027344,
+        "cos_real": 0.8260192275047302,
+        "cos_shuffled": 0.8025996685028076,
+        "cos_gap": 0.023419559001922607,
+        "ema_momentum": 0.999999868929812,
+        "peak_memory_mb": 5620.89208984375,
+        "elapsed_s": 12781.51462935,
+        "skipped_frac": NaN,
+        "positives_per_anchor": NaN,
+        "value_loss": NaN,
+        "lm_events_kept": NaN,
+        "wall_s": 12791.8
+      },
+      "auroc": {
+        "mortality_365d": 0.9263893249607534,
+        "inpatient_365d": 0.7227603640040445,
+        "readmission_30d": 0.6455991237677985,
+        "new_dx_365d/diabetes": 0.8951552965107182,
+        "new_dx_365d/heart_failure": 0.8860987103174603,
+        "new_dx_365d/ckd": 0.9153392566503908,
+        "new_dx_365d/copd": 0.7519339976427729
+      },
+      "finished": "2026-10-23T10:57:07+00:00"
+    },
+    {
+      "run": "ar_s0",
+      "mode": "probe",
+      "ft_batch": null,
+      "objective": "ar",
+      "pooling": "last@final",
+      "reuse_checkpoint": null,
+      "target_mode": null,
+      "lambda_sigreg": null,
+      "p_future": null,
+      "steps": 30518,
+      "tokens": 1000013824,
+      "batch_size": 64,
+      "max_len": 512,
+      "overrides": {
+        "data.cache_dir": "data/cache/mimic-iv-full",
+        "objective.kind": "ar",
+        "model.causal": true,
+        "model.tie_embeddings": true,
+        "run.seed": 0
+      },
+      "final": {
+        "step": 30518.0,
+        "loss": 0.9579603672027588,
+        "pred_loss": NaN,
+        "sigreg_tokens": NaN,
+        "sigreg_cls": NaN,
+        "recon_loss": NaN,
+        "recon_value_loss": NaN,
+        "ce": 0.9579603672027588,
+        "top1": 0.7750919461250305,
+        "top10": 0.9373242259025574,
+        "lr": 3.0000007920177064e-06,
+        "grad_norm": 0.4185740351676941,
+        "tokens_per_s": 57261.37614941964,
+        "mean_std": 0.9611148834228516,
+        "effective_rank": 216.65554809570312,
+        "cos_real": 0.0,
+        "cos_shuffled": 0.0,
+        "cos_gap": 0.0,
+        "ema_momentum": NaN,
+        "peak_memory_mb": 4948.9931640625,
+        "elapsed_s": 9701.710761761,
+        "skipped_frac": NaN,
+        "positives_per_anchor": NaN,
+        "value_loss": NaN,
+        "lm_events_kept": NaN,
+        "wall_s": 9711.1
+      },
+      "auroc": {
+        "mortality_365d": 0.9343066457352172,
+        "inpatient_365d": 0.6908594539939331,
+        "readmission_30d": 0.616946330777656,
+        "new_dx_365d/diabetes": 0.8827843842904084,
+        "new_dx_365d/heart_failure": 0.8761036706349207,
+        "new_dx_365d/ckd": 0.9132447503935538,
+        "new_dx_365d/copd": 0.747283831565413
+      },
+      "finished": "2026-10-23T13:40:46+00:00"
+    }
+  ],
+  "baselines": {
+    "gbm": {
+      "inpatient_365d": 0.7003707448601281,
+      "mortality_365d": 0.9353689167974881,
+      "new_dx_365d/ckd": 0.9296139171269244,
+      "new_dx_365d/copd": 0.78889960355727,
+      "new_dx_365d/diabetes": 0.9129439837271163,
+      "new_dx_365d/heart_failure": 0.899516369047619,
+      "readmission_30d": 0.6170602409638555
+    },
+    "lr": {
+      "inpatient_365d": 0.6801988540613414,
+      "mortality_365d": 0.9392935635792778,
+      "new_dx_365d/ckd": 0.889458096534059,
+      "new_dx_365d/copd": 0.7962712954034074,
+      "new_dx_365d/diabetes": 0.9057268033171647,
+      "new_dx_365d/heart_failure": 0.8751736111111111,
+      "readmission_30d": 0.6255421686746987
+    }
+  },
+  "source": "mimic-iv",
+  "updated": "2026-10-23T13:40:46+00:00",
+  "eval": {
+    "bootstrap": 200,
+    "eval_subject_limit": null,
+    "eval_subject_seed": 0,
+    "seed": 0,
+    "probe_features": "auto",
+    "probe_layer": "final",
+    "eval_modes": [
+      "probe"
+    ]
+  }
+}

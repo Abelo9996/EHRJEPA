@@ -1,0 +1,25 @@
+# Scaling run: AR vs hybrid at 1B tokens, 3 seeds, on the ~30k MIMIC cache.
+# Pairs with the 300M AR/hybrid from mimic-objectives-300m to form the 300M->1B
+# curve. Question: does hybrid pull ahead of AR at scale (the DE-SynPUF signature:
+# AR plateaus, hybrid keeps climbing)? If yes, hybrid earns its cost; if AR keeps
+# pace, use AR. Same sigreg 0.05 as the 300M point for a clean curve.
+name: mimic-scale-1b
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 1000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0]
+runs:
+  - {name: ar_s0, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: hybrid_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: ar_s1, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
+  - {name: hybrid_s1, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: ar_s2, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 2}}
+  - {name: hybrid_s2, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 2}}

@@ -1,0 +1,67 @@
+# MIMIC-IV v3.1 preliminary hybrid-vs-AR grid (RTX 4060).
+#
+# The first test of the DE-SynPUF finding on REAL hospital data with labs and
+# vitals. Two objectives -- the AR baseline and the repository-default hybrid
+# (configs/pretrain_default.yaml: causal next-latent [1,4,16] + tied next-code,
+# EMA target, no SIGReg) -- each at 2 seeds, on a ~30k-subject subject subset of
+# MIMIC-IV v3.1 (systematic every-12th-patient sample). Short budget (20M
+# nominal token slots/cell) so the whole grid fits a single session; this is a
+# PRELIMINARY read, not the full stage-B run.
+#
+# Cells are ordered seed-0 first so the headline ar_s0-vs-hybrid_s0 comparison
+# lands before either seed-1 cell; the grid is resumable and can be stopped
+# after any cell.
+#
+# Eval is the same frozen-probe + lr/gbm baseline harness and the same seven
+# task configs as DE-SynPUF (configs/tasks/*.yaml); predicates.yaml already maps
+# every task concept to MIMIC-IV codes, so no task change is needed. Baselines
+# (lr, gbm) are fit fresh here (no matching prior MIMIC run to reuse).
+
+name: mimic-hybrid-ar-100m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 100000000
+seed: 0
+
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+
+control_models: [random_init]
+# ar and hybrid are both causal (last@final pooling) -> one untrained control.
+control_runs: [ar_s0]
+
+runs:
+  - name: ar_s0
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      run.seed: 0
+  - name: hybrid_s0
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+      run.seed: 0
+  - name: ar_s1
+    overrides:
+      objective.kind: ar
+      model.causal: true
+      model.tie_embeddings: true
+      run.seed: 1
+  - name: hybrid_s1
+    overrides:
+      objective.kind: nextlatent
+      model.causal: true
+      model.target_mode: ema
+      objective.horizons: [1, 4, 16]
+      objective.lambda_recon: 0.1
+      objective.lambda_sigreg: 0.0
+      run.seed: 1

@@ -1,0 +1,418 @@
+[
+  {
+    "task": "new_dx_365d/ckd",
+    "auroc_all": 0.9389,
+    "auroc_without_near": 0.9389,
+    "delta": 0.0,
+    "near_gain_share": 0.0,
+    "near_columns": 0,
+    "train_n": 8463,
+    "train_pos": 626,
+    "has_near_rate_pos": 0.011182108626198083,
+    "has_near_rate_neg": 0.0025519969376036748,
+    "top": [
+      {
+        "code": "MIMIC_IV_LABITEM/50912",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0141
+      },
+      {
+        "code": "NDC/004097811",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0075
+      },
+      {
+        "code": "NDC/615530118",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.007
+      },
+      {
+        "code": "MIMIC_IV_ITEM/221749/Continuous Med",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0068
+      },
+      {
+        "code": "MIMIC_IV_Transfer/Hematology/Oncology",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0063
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51737",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.006
+      },
+      {
+        "code": "MIMIC_IV_ITEM/227471",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0057
+      },
+      {
+        "code": "NDC/009046522",
+        "block": "n_vals",
+        "near": false,
+        "gain": 0.0055
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225639",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0055
+      },
+      {
+        "code": "MIMIC_IV_ITEM/227456",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0055
+      },
+      {
+        "code": "NDC/003380703",
+        "block": "n_vals",
+        "near": false,
+        "gain": 0.005
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/50856",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.005
+      },
+      {
+        "code": "MIMIC_IV_ITEM/228368",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0046
+      },
+      {
+        "code": "MIMIC_IV_Insurance/Medicare",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0046
+      },
+      {
+        "code": "MIMIC_IV_ITEM/224391",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0045
+      }
+    ]
+  },
+  {
+    "task": "new_dx_365d/diabetes",
+    "auroc_all": 0.9191,
+    "auroc_without_near": 0.9191,
+    "delta": 0.0,
+    "near_gain_share": 0.0,
+    "near_columns": 4,
+    "train_n": 8130,
+    "train_pos": 813,
+    "has_near_rate_pos": 0.012300123001230012,
+    "has_near_rate_neg": 0.009156758234249008,
+    "top": [
+      {
+        "code": "NDC/004094902",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0242
+      },
+      {
+        "code": "NDC/000027510",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0234
+      },
+      {
+        "code": "NDC/000028215",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0116
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225210",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0097
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51069",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0097
+      },
+      {
+        "code": "MIMIC_IV_Drug/Insulin",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0082
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51070",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.008
+      },
+      {
+        "code": "MIMIC_IV_Transfer/UNKNOWN",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0073
+      },
+      {
+        "code": "MIMIC_IV_ITEM/224696",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0065
+      },
+      {
+        "code": "NDC/383960550",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.006
+      },
+      {
+        "code": "NDC/383960550",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0057
+      },
+      {
+        "code": "MIMIC_IV_ITEM/228868",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0056
+      },
+      {
+        "code": "MIMIC_IV_ITEM/224279",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0051
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225166/Continuous IV",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0047
+      },
+      {
+        "code": "MIMIC_IV_ITEM/228640",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0045
+      }
+    ]
+  },
+  {
+    "task": "new_dx_365d/heart_failure",
+    "auroc_all": 0.8995,
+    "auroc_without_near": 0.8995,
+    "delta": 0.0,
+    "near_gain_share": 0.0,
+    "near_columns": 2,
+    "train_n": 8509,
+    "train_pos": 753,
+    "has_near_rate_pos": 0.006640106241699867,
+    "has_near_rate_neg": 0.0036101083032490976,
+    "top": [
+      {
+        "code": "MIMIC_IV_LABITEM/50963",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0427
+      },
+      {
+        "code": "MIMIC_IV_Insurance/Medicare",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0132
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51237",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0123
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51006",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0093
+      },
+      {
+        "code": "MIMIC_IV_Insurance/Medicare",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0073
+      },
+      {
+        "code": "MIMIC_IV_ITEM/226138",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0067
+      },
+      {
+        "code": "MIMIC_IV_Service/CMED",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0066
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225176",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0065
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/50963",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0062
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/50816",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0058
+      },
+      {
+        "code": "NDC/004097793",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0058
+      },
+      {
+        "code": "MIMIC_IV_Service/CMED",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0052
+      },
+      {
+        "code": "MIMIC_IV_ITEM/227368",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0049
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/50911",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0043
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225113",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.004
+      }
+    ]
+  },
+  {
+    "task": "new_dx_365d/copd",
+    "auroc_all": 0.7889,
+    "auroc_without_near": 0.7889,
+    "delta": 0.0,
+    "near_gain_share": 0.0,
+    "near_columns": 2,
+    "train_n": 8697,
+    "train_pos": 396,
+    "has_near_rate_pos": 0.020202020202020204,
+    "has_near_rate_neg": 0.004095892061197446,
+    "top": [
+      {
+        "code": "MIMIC_IV_Insurance/Medicare",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0227
+      },
+      {
+        "code": "NDC/005970075",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0121
+      },
+      {
+        "code": "NDC/001730696",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.01
+      },
+      {
+        "code": "MIMIC_IV_ITEM/223907",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0091
+      },
+      {
+        "code": "MIMIC_IV_ITEM/229091",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0084
+      },
+      {
+        "code": "MIMIC_IV_ITEM/228880",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0068
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225059",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0066
+      },
+      {
+        "code": "MIMIC_IV_ITEM/225641",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0059
+      },
+      {
+        "code": "MIMIC_IV_Language/English",
+        "block": "cnt365d",
+        "near": false,
+        "gain": 0.0059
+      },
+      {
+        "code": "NDC/004870201",
+        "block": "cnt_all",
+        "near": false,
+        "gain": 0.0058
+      },
+      {
+        "code": "MIMIC_IV_ITEM/228011",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.0057
+      },
+      {
+        "code": "MIMIC_IV_Drug/SW",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0055
+      },
+      {
+        "code": "NDC/005970075",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0055
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/50818",
+        "block": "last_z",
+        "near": false,
+        "gain": 0.0051
+      },
+      {
+        "code": "MIMIC_IV_LABITEM/51237",
+        "block": "cnt30d",
+        "near": false,
+        "gain": 0.005
+      }
+    ]
+  }
+]

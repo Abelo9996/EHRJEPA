@@ -1,0 +1,238 @@
+{
+  "created_at": "2026-11-06T18:24:50.644545+00:00",
+  "meds_dir": "data/meds/mimic-demo",
+  "tasks_dir": "data/tasks/mimic-demo",
+  "admissions_path": "data/mimic-iv-demo/mimic-iv-clinical-database-demo-2.2/hosp/admissions.csv.gz",
+  "admissions_sha256": "910b9f160ffdf1e08ea673585393f347c773ccc87d66875c627584a903ae8493",
+  "audit_code_sha256": "937dbcd57c5f41e60d489d5b8d3c0313b2a842e0fdd9dcad34c5b158d33c96ae",
+  "predicates_sha256": "56c0c2746cd81eda61062a75228bee33de1ba730cd937aef9987aeb00274bbff",
+  "task_config_sha256": "d21247b18b57bb6dd167d199c01b14fedd15df1ae05f7b280b1a667e68aa7a34",
+  "interpretation": "First matching MEDS diagnosis coincides with discharge of a hospital stay containing the anchor. This is a timing audit, not clinical onset adjudication or a feature-leakage test. Pooled counts are task-label rows, not unique patients.",
+  "tasks": {
+    "new_dx_365d/diabetes": {
+      "labels_sha256": "f7405eb84698c48e7b5cec6ae8b63d3a9f0466c80af960cd66834eac4984e091",
+      "all": {
+        "label_rows": 40,
+        "positives": 8,
+        "subjects_without_admission_rows": 0,
+        "anchors_in_stay": 38,
+        "anchors_strictly_in_stay": 38,
+        "anchors_with_overlapping_stays": 0,
+        "positives_at_current_stay_discharge": 6,
+        "fraction_of_positives_at_current_stay_discharge": 0.75,
+        "label_mismatches": 0,
+        "rows_with_diagnosis_at_or_before_anchor": 0
+      },
+      "by_split": {
+        "held_out": {
+          "label_rows": 3,
+          "positives": 1,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 3,
+          "anchors_strictly_in_stay": 3,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 1,
+          "fraction_of_positives_at_current_stay_discharge": 1.0,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "train": {
+          "label_rows": 33,
+          "positives": 7,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 32,
+          "anchors_strictly_in_stay": 32,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 5,
+          "fraction_of_positives_at_current_stay_discharge": 0.7142857142857143,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "tuning": {
+          "label_rows": 4,
+          "positives": 0,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 3,
+          "anchors_strictly_in_stay": 3,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 0,
+          "fraction_of_positives_at_current_stay_discharge": null,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        }
+      }
+    },
+    "new_dx_365d/heart_failure": {
+      "labels_sha256": "a69a0a468cd92ac193e84ba6767ac8019b3695834a33bc7d734a7e4451fc236a",
+      "all": {
+        "label_rows": 43,
+        "positives": 9,
+        "subjects_without_admission_rows": 0,
+        "anchors_in_stay": 40,
+        "anchors_strictly_in_stay": 40,
+        "anchors_with_overlapping_stays": 0,
+        "positives_at_current_stay_discharge": 8,
+        "fraction_of_positives_at_current_stay_discharge": 0.8888888888888888,
+        "label_mismatches": 0,
+        "rows_with_diagnosis_at_or_before_anchor": 0
+      },
+      "by_split": {
+        "held_out": {
+          "label_rows": 4,
+          "positives": 1,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 3,
+          "anchors_strictly_in_stay": 3,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 1,
+          "fraction_of_positives_at_current_stay_discharge": 1.0,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "train": {
+          "label_rows": 35,
+          "positives": 8,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 34,
+          "anchors_strictly_in_stay": 34,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 7,
+          "fraction_of_positives_at_current_stay_discharge": 0.875,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "tuning": {
+          "label_rows": 4,
+          "positives": 0,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 3,
+          "anchors_strictly_in_stay": 3,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 0,
+          "fraction_of_positives_at_current_stay_discharge": null,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        }
+      }
+    },
+    "new_dx_365d/ckd": {
+      "labels_sha256": "44f190ff3664585d467b87d8ed2b32a327c183800cbbe256f0290e7648a6a605",
+      "all": {
+        "label_rows": 42,
+        "positives": 12,
+        "subjects_without_admission_rows": 0,
+        "anchors_in_stay": 39,
+        "anchors_strictly_in_stay": 39,
+        "anchors_with_overlapping_stays": 0,
+        "positives_at_current_stay_discharge": 9,
+        "fraction_of_positives_at_current_stay_discharge": 0.75,
+        "label_mismatches": 0,
+        "rows_with_diagnosis_at_or_before_anchor": 0
+      },
+      "by_split": {
+        "held_out": {
+          "label_rows": 3,
+          "positives": 0,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 2,
+          "anchors_strictly_in_stay": 2,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 0,
+          "fraction_of_positives_at_current_stay_discharge": null,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "train": {
+          "label_rows": 33,
+          "positives": 11,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 32,
+          "anchors_strictly_in_stay": 32,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 8,
+          "fraction_of_positives_at_current_stay_discharge": 0.7272727272727273,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "tuning": {
+          "label_rows": 6,
+          "positives": 1,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 5,
+          "anchors_strictly_in_stay": 5,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 1,
+          "fraction_of_positives_at_current_stay_discharge": 1.0,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        }
+      }
+    },
+    "new_dx_365d/copd": {
+      "labels_sha256": "bf3104358c93359cb0b457ef6f45bdace9b3362e270239a64332c6953af9fc1c",
+      "all": {
+        "label_rows": 43,
+        "positives": 4,
+        "subjects_without_admission_rows": 0,
+        "anchors_in_stay": 40,
+        "anchors_strictly_in_stay": 40,
+        "anchors_with_overlapping_stays": 0,
+        "positives_at_current_stay_discharge": 4,
+        "fraction_of_positives_at_current_stay_discharge": 1.0,
+        "label_mismatches": 0,
+        "rows_with_diagnosis_at_or_before_anchor": 0
+      },
+      "by_split": {
+        "held_out": {
+          "label_rows": 2,
+          "positives": 0,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 1,
+          "anchors_strictly_in_stay": 1,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 0,
+          "fraction_of_positives_at_current_stay_discharge": null,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "train": {
+          "label_rows": 37,
+          "positives": 4,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 36,
+          "anchors_strictly_in_stay": 36,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 4,
+          "fraction_of_positives_at_current_stay_discharge": 1.0,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        },
+        "tuning": {
+          "label_rows": 4,
+          "positives": 0,
+          "subjects_without_admission_rows": 0,
+          "anchors_in_stay": 3,
+          "anchors_strictly_in_stay": 3,
+          "anchors_with_overlapping_stays": 0,
+          "positives_at_current_stay_discharge": 0,
+          "fraction_of_positives_at_current_stay_discharge": null,
+          "label_mismatches": 0,
+          "rows_with_diagnosis_at_or_before_anchor": 0
+        }
+      }
+    }
+  },
+  "pooled_task_rows": {
+    "label_rows": 168,
+    "positives": 33,
+    "subjects_without_admission_rows": 0,
+    "anchors_in_stay": 157,
+    "anchors_strictly_in_stay": 157,
+    "anchors_with_overlapping_stays": 0,
+    "positives_at_current_stay_discharge": 27,
+    "fraction_of_positives_at_current_stay_discharge": 0.8181818181818182,
+    "label_mismatches": 0,
+    "rows_with_diagnosis_at_or_before_anchor": 0
+  },
+  "labels_consistent": true
+}

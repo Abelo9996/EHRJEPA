@@ -154,7 +154,7 @@ class LatentObjective(nn.Module):
         head = self._heads[0]
         if self.config.lambda_recon == 0.0 or head is None:
             return zero, {}
-        if self.config.kind == "nextlatent":
+        if self.config.kind in ("nextlatent", "state"):
             hidden = output.extras.get("recon_hidden")
             codes = output.extras.get("recon_code_id")
             if hidden is None or codes is None:
@@ -219,6 +219,10 @@ class LatentObjective(nn.Module):
             **{name: value.detach() for name, value in extra.items()},
         }
         losses.update(_anchor_diagnostics(output))
+        # Model-reported scalars (``diag_*``), logged under their bare names.
+        for name, value in output.extras.items():
+            if name.startswith("diag_"):
+                losses[name[len("diag_") :]] = value.detach().float()
         return losses
 
 

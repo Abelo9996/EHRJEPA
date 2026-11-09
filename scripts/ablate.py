@@ -534,8 +534,8 @@ def _short(path: Path) -> str:
 
 
 def _latent_only(kind: str, value: Any) -> Any:
-    """Blank for ``ar``, which has no target network and no SIGReg term."""
-    return None if kind == "ar" else value
+    """Blank for ``ar`` and ``mlm``, which have no target network and no SIGReg term."""
+    return None if kind in ("ar", "mlm") else value
 
 
 def _masked_only(kind: str, value: Any) -> Any:

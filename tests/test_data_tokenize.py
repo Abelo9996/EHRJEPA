@@ -681,3 +681,47 @@ def test_build_cache_threads_max_vocab_and_ndc_digits(tmp_path: Path) -> None:
     assert meta["fit"]["ndc_digits"] == 9
     vocab = Vocabulary.read(tmp_path / "cache" / "vocab.parquet")
     assert len(vocab) == 12 and vocab.ndc_digits == 9
+
+
+def test_build_cache_reuses_a_fitted_tokenizer(
+    built_cache: tuple[Path, dict], tmp_path: Path
+) -> None:
+    """A second MEDS directory built through the first cache's fit is tokenized identically."""
+    source, _ = built_cache
+    start = dt.datetime(1980, 1, 1)
+    # New subjects, different value range, and a code the source never saw: a fresh
+    # fit (and these fit args) would all change the vocabulary and quantizer.
+    other = _frame(
+        _fixture_events(20, 70, start)
+        + [(20, start + dt.timedelta(days=999), "NEW//only_here", None)]
+    )
+    meds_dir = _write_meds(tmp_path / "meds", {"train": other, "tuning": other.clear()})
+    out = tmp_path / "cache"
+    meta = build_cache(
+        meds_dir, out, min_count=1, max_vocab=7, splits=("train", "tuning"), reuse_fit_from=source
+    )
+    for name in ("vocab.parquet", "quantizer.parquet", "vocab.json"):
+        assert (out / name).read_bytes() == (source / name).read_bytes()
+    assert meta["fit"]["reused_from"] == str(source)
+    assert meta["vocab_size"] == len(Vocabulary.read(source / "vocab.parquet"))
+    assert meta["per_split"]["train"]["unk_rate"] > 0  # resolved, not added
+    # Shared codes get the source's ids.
+    src_vocab = Vocabulary.read(source / "vocab.parquet")
+    lab_id = src_vocab.resolve("LAB//A")[0]
+    codes = np.load(out / "train" / "code_id.npy")
+    assert lab_id in set(codes.tolist())
+
+
+def test_build_cache_rejects_a_fit_from_another_tokenizer_version(
+    built_cache: tuple[Path, dict], tmp_path: Path
+) -> None:
+    source, _ = built_cache
+    stale = tmp_path / "stale_fit"
+    stale.mkdir()
+    for name in ("vocab.parquet", "quantizer.parquet"):
+        (stale / name).write_bytes((source / name).read_bytes())
+    summary = json.loads((source / "vocab.json").read_text())
+    summary["tokenizer_version"] = -1
+    (stale / "vocab.json").write_text(json.dumps(summary))
+    with pytest.raises(ValueError, match="tokenizer version"):
+        build_cache(tmp_path / "unused", tmp_path / "cache", reuse_fit_from=stale)

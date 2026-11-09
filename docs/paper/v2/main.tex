@@ -1,0 +1,635 @@
+%==============================================================================
+%  EHRJEPA v2 -- draft (Oct 2026). Build: pdflatex main; bibtex main; pdflatex x2
+%  Red [TODO: ...] markers = results of the state-model gate, not yet available.
+%==============================================================================
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{enumitem}
+\emergencystretch=3em
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\ci}[2]{\,[{#1},\,{#2}]}
+
+\title{\textbf{Latent Prediction Helps EHR Foundation Models Only Next to a Token Loss,\\
+and Only Fine-Tuning Shows It:\\
+A Careful Public-Data Study and an Action-Conditioned Patient-State Model}}
+\author{Abel Yagubyan\\
+\small University of California, Berkeley\\
+\small \texttt{abelyagubyan@berkeley.edu}}
+\date{Draft, October 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\begin{abstract}
+Joint-embedding predictive architectures (JEPAs) have been proposed as
+pretraining objectives for structured electronic health records (EHRs), alone
+and as an auxiliary term to next-token prediction. Published EHR evidence is
+mixed and rests almost entirely on frozen linear probes, single seeds and
+private or text-serialized data. We train small (10M-parameter) transformers
+from scratch on coded MIMIC-IV events and compare objectives under three
+seeds, a leakage-checked count-feature gradient-boosting baseline, paired
+subject-level bootstrap intervals, and both frozen probing and end-to-end
+fine-tuning. Three findings. (i) Every objective without a dense next-code loss
+trails next-code autoregression (AR) by 0.06--0.09 mean AUROC, agreeing with
+recent reports that latent prediction alone underperforms token-level
+objectives. (ii) Adding a multi-horizon next-latent term to AR (a hybrid)
+improves fine-tuned performance over AR by $+0.008$ AUROC
+\ci{+0.002}{+0.014}; against gradient boosting the hybrid gains $+0.013$
+\ci{-0.001}{+0.028}, which is not significant. (iii) The frozen probe ranks the
+hybrid \emph{below} gradient boosting (0.803 vs 0.808) while fine-tuning ranks it
+above (0.822), so the protocol used by prior EHR-JEPA work can hide the effect
+it is meant to measure. Following the suggestion that EHR latent targets
+should be patient states whose transitions are shaped by care decisions, and
+prior action-conditioned EHR JEPA work on text encoders, we test a small
+code-token action-conditioned patient-state objective with a treatment-blind control: 4-hour state
+representations predicted $k\in\{1,2,4\}$ windows ahead from the current state and
+the intervening treatments, trained jointly with the next-code loss.
+\todo{gate result: state\_ac vs hybrid / AR / MLM / GBM, fine-tuned mean-of-6 with CI}
+\todo{action-sensitivity result: state\_ac vs treatment-blind control}
+Code and configurations are public.
+\end{abstract}
+
+%==============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Foundation models for structured EHRs are mostly trained by predicting the
+next medical code \citep{clmbr,ethos,cehrgpt,delphi2m,motor} or masked codes
+\citep{behrt,medbert}. JEPAs \citep{ijepa,vjepa2,lejepa} instead predict the
+\emph{representation} of withheld content, which in vision and video gives
+representations that are cheaper to learn and more abstract than pixel
+reconstruction, and V-JEPA~2-AC \citep{vjepa2} uses an action-conditioned
+latent predictor as a world model for planning. Whether this carries over to
+EHRs is unresolved. SMB-Structure \citep{smbstructure} combined next-token
+prediction with an EMA-target JEPA term on a text-serialized 8B language model
+and reported gains of up to about $+0.013$ on private data under linear
+probing. Clin-JEPA \citep{clinjepa} reported gains over LightGBM with a
+multi-phase co-training recipe on an LLM text encoder and already trains an
+action-conditioned latent world model on hourly ICU state--action pairs. Gupta et
+al.\ \citep{imperialjepa} found that three JEPA formulations on MIMIC-IV train
+stably but consistently underperform masked language modelling (MLM) under
+linear probing, and proposed that EHR latent targets be aggregated
+\emph{patient states} whose transitions are modelled, noting that future
+observations are partly determined by clinical decisions rather than by the
+patient alone.
+
+Two methodological gaps make these results hard to combine. First, their downstream comparisons rest on frozen
+representations with a linear probe; none compares the probe ranking of objectives with
+the ranking after end-to-end fine-tuning, where downstream use actually happens. Second, none reports
+seeds, paired intervals, or a tuned tabular baseline audited for label
+leakage, so differences of $\pm 0.01$ AUROC---the size of every reported gain---cannot be
+distinguished from noise.
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=2pt]
+\item \textbf{A careful, public-data comparison.} MIMIC-IV \citep{mimiciv} in
+MEDS format \citep{meds}, one token per coded event, 10M-parameter models
+trained from scratch at matched token budgets, three seeds, paired
+subject-level bootstrap, a count-feature XGBoost baseline checked for label
+leakage, and both frozen-probe and fine-tuned evaluation on identical anchors
+(\S\ref{sec:eval}).
+\item \textbf{Latent prediction helps only as an auxiliary to a token loss.}
+Latent-only objectives lose to AR by 0.06--0.09, agreeing with
+\citet{imperialjepa}. A next-latent term \emph{added} to AR (the hybrid; the
+same family of combination as \citep{smbstructure}) beats AR significantly under fine-tuning,
+$+0.008$ \ci{+0.002}{+0.014} (\S\ref{sec:results}).
+\item \textbf{The probe hides the gain.} Frozen probing ranks the hybrid below
+tuned gradient boosting; fine-tuning reverses the order. The hybrid's margin
+over gradient boosting, $+0.013$ \ci{-0.001}{+0.028}, is not significant on our
+1{,}346-patient labelled test set, and we do not claim it.
+\item \textbf{A code-token patient-state model with a treatment-blind control.}
+Action-conditioned latent prediction on MIMIC-IV has been proposed before
+with an 8B text encoder \citep{clinjepa}. We test a small, from-scratch,
+code-token version of the patient-state direction proposed by
+\citet{imperialjepa}: events pooled into 4-hour states, treatments separated
+from observations and given to the predictor as inputs, trained jointly with
+the next-code loss, and compared against an otherwise identical
+treatment-blind control and an MLM baseline (\S\ref{sec:state}). The model
+is predictive, not causal. \todo{one-line gate outcome}
+\end{enumerate}
+We also outline a public benchmark that checks action-conditioned EHR models
+against effects known from randomized trials (\S\ref{sec:discussion}); it is
+planned work and no results are reported for it.
+
+%==============================================================================
+\section{Related work}
+\label{sec:related}
+
+\paragraph{EHR foundation models.}
+Next-code models on coded events include CLMBR \citep{clmbr}, the
+time-to-event model MOTOR \citep{motor}, ETHOS \citep{ethos}, CEHR-GPT
+\citep{cehrgpt}, EHRMamba \citep{ehrmamba} and Delphi-2M \citep{delphi2m};
+BEHRT and Med-BERT use masked-code objectives \citep{behrt,medbert}. Scaling,
+context length and tokenization have been studied
+\citep{ehrscaling,contextclues,tokenization}. EHRSHOT \citep{ehrshot} and FoMoH
+\citep{fomoh} standardize evaluation, and MEDS \citep{meds}, ACES \citep{aces}
+and MEDS-Tab \citep{medstab} standardize data, cohorts and tabular baselines;
+we use all three.
+
+\paragraph{The JEPA family.}
+I-JEPA \citep{ijepa} predicts masked image-block representations from an EMA
+target encoder; V-JEPA~2 \citep{vjepa2} extends this to video and, with an
+action-conditioned predictor (V-JEPA~2-AC), to planning. LeJEPA
+\citep{lejepa} replaces architectural anti-collapse devices with the SIGReg
+distribution penalty, which we use. LLM-JEPA \citep{llmjepa} adds a JEPA term
+to a language model's next-token loss; SALT \citep{salt} uses frozen teachers;
+LeNEPA \citep{lenepa} and TS-JEPA \citep{tsjepa} predict next latents in time
+series.
+
+\paragraph{JEPAs for EHRs.}
+SMB-Structure \citep{smbstructure} is, to our knowledge, the first
+next-token\,+\,JEPA hybrid for longitudinal EHRs, framed as a world-model
+training paradigm; it serializes records as text for an 8B LLM fine-tuned with
+LoRA, trains on private oncology data and INSPECT, evaluates by linear probe, and
+reports that the joint (non-curriculum) hybrid can hurt. Clin-JEPA
+\citep{clinjepa} co-trains a Qwen3-8B text encoder with a latent predictor on a
+MIMIC-IV ICU cohort, and adds an action-conditioned latent world model
+(hourly state--action text pairs, a $\sim$92M block-causal predictor,
+evaluated by rollouts), without trial-based checks or a public benchmark. Gupta et al.\ \citep{imperialjepa} compare three JEPA
+formulations with MLM on MIMIC-IV under linear probing and find JEPA
+consistently worse. Our study differs in using coded events with a small model
+trained from scratch on public data, in evaluating fine-tuned models with
+seeds and paired intervals, and, for the state model, in using code tokens
+with a treatment-blind control rather than a text encoder.
+
+\paragraph{World models and treatment effects.}
+Latent world models predict future latent state given actions
+\citep{worldmodels,vjepa2}. Counterfactual outcome models over time, such as
+CRN \citep{crn} and the Causal Transformer \citep{causaltransformer}, adjust
+for time-varying confounding by treatment assignment. Target-trial emulation
+\citep{hernan2016} and its large-scale replication against randomized trials
+\citep{rctduplicate} provide the external reference we plan to use for
+evaluating action-conditioned EHR models (\S\ref{sec:discussion}).
+
+%==============================================================================
+\section{Data}
+\label{sec:data}
+
+\paragraph{Source and format.}
+MIMIC-IV v3.1 \citep{mimiciv} is lowered to MEDS with \code{meds\_etl}. Shards
+carry the MEDS core columns (\code{subject\_id}, \code{time}, \code{code},
+\code{numeric\_value}, \code{text\_value}). Splits are a deterministic hash of
+the subject identifier (80/10/10 train/tuning/held-out).
+
+\paragraph{Three pretraining pools, one test set.}
+We build three subject-nested pools: an 8\% subset (every 12th patient,
+30{,}386 subjects; 24{,}240 train subjects, 45.3M train events), a 25\% subset
+(91{,}157 subjects; 72{,}900 train subjects, 138.0M events) and the full
+database (291{,}495 train subjects, 546.4M events; 248{,}743 with at least 16
+events are used for pretraining). The vocabulary and value quantizer are fit on
+the 8\% train split and reused for the larger pools (99.91\% of full-pool
+codes map directly), so pools differ only in subject count. All 3{,}038
+held-out subjects of the 8\% split lie inside the larger pools' held-out
+splits, and none is in any pretraining split. \emph{Every downstream number in
+this paper is scored on these 8\% held-out subjects, with probes, fine-tuning
+heads and baselines fit on the 8\% train labels}; this isolates the effect of
+pretraining data from that of label count.
+
+\paragraph{Tokenization.}
+One event becomes one token. Codes with at least five training occurrences get
+their own id; rarer codes roll up to the nearest frequent ancestor (ICD
+prefixes, NDC labeller, etc.) before \code{[UNK]}, giving 18{,}736 ids. Each
+token also carries a per-code decile bin and $z$-score of its numeric value,
+age, and the log time since the previous event. These are summed into the
+input embedding through Fourier-feature MLPs; position enters separately
+through rotary embeddings. Models read windows of up to 512 events.
+
+\paragraph{Actions.}
+For the state model (\S\ref{sec:state}) we mark as \emph{actions} the events
+whose codes denote treatments: prescriptions and administrations (NDC and
+MIMIC drug codes), procedures (ICD-9 procedure, ICD-10-PCS, HCPCS) and ICU
+input events, plus a curated list of procedure and ingredient item ids. All
+other events are \emph{observations}. On the MIMIC-IV demo cache about 7.5\% of
+events are actions.
+
+%==============================================================================
+\section{Method}
+\label{sec:method}
+
+\paragraph{Encoder.}
+All models share a pre-norm transformer encoder $f_\theta$ (6 layers, width
+256, 4 heads, SwiGLU feed-forward, rotary positions; $\approx$10.3M trainable
+parameters), causal for AR, hybrid and state objectives and bidirectional for
+masked objectives. Let $h_i$ be the encoder output at event $i$ and
+$E\in\mathbb{R}^{V\times d}$ the code embedding table.
+
+\paragraph{Next-code AR.}
+A tied head scores the next code:
+\begin{equation}
+\mathcal{L}_{\mathrm{code}} = -\frac{1}{N}\sum_i
+\log\frac{\exp(E_{c_{i+1}}^{\top}h_i)}{\sum_{c'}\exp(E_{c'}^{\top}h_i)} .
+\end{equation}
+Only the code is predicted; values and times are inputs.
+
+\paragraph{Latent-only objectives.}
+We compare four objectives without a dense next-code loss on the encoder's own states:
+(a) masked-span JEPA with a bidirectional encoder and EMA target; (b) the same
+architecture trained only to reconstruct masked codes from predicted latents;
+(c) causal next-latent prediction (below, with $\lambda_{\mathrm{code}}=0$);
+(d) prediction of mean target latents over 30- and 365-day windows.
+
+\paragraph{Target encoder and SIGReg.}
+Latent targets come from an EMA copy $f_{\bar\theta}$,
+$\bar\theta \leftarrow m(t)\bar\theta + (1-m(t))\theta$, with $m$ rising
+linearly from 0.996 to 1, under stop-gradient, and are normalized by a
+parameter-free LayerNorm: $\tilde z_j = \mathrm{LN}(f_{\bar\theta}(x)_j)$.
+Collapse is discouraged by SIGReg \citep{lejepa}: embeddings are projected onto
+$K=256$ random directions and each projection's empirical characteristic function is
+penalized for deviating from a standard normal's.
+
+\paragraph{Hybrid.}
+For horizons $\mathcal{H}=\{1,4,16\}$ events, a per-horizon MLP head $g^{(k)}$
+receives $h_i$ plus a time embedding of the target event and predicts
+$\tilde z_{i+k}$:
+\begin{equation}
+\mathcal{L}_{\mathrm{lat}}=\frac{1}{|\mathcal{H}|}\sum_{k\in\mathcal{H}}
+\frac{1}{|\mathcal{V}_k|}\sum_{i\in\mathcal{V}_k}
+\ell_\beta\big(g^{(k)}(h_i+u(t_{i+k})),\,\tilde z_{i+k}\big),
+\qquad
+\mathcal{L}_{\mathrm{hyb}} = \mathcal{L}_{\mathrm{lat}} + 0.1\,\mathcal{L}_{\mathrm{code}} + 0.05\,\mathrm{SIGReg},
+\end{equation}
+with $\ell_\beta$ the smooth-$L_1$ loss averaged over feature dimensions. Setting the latent
+weight to zero recovers AR exactly (a unit test pins this), so the hybrid is a
+controlled addition to AR.
+
+\paragraph{MLM baseline.}
+Bidirectional masked-code prediction with 15\% masking (80/10/10 replacement),
+the baseline of \citet{imperialjepa}, on the same encoder.
+
+\subsection{Action-conditioned patient-state objective}
+\label{sec:state}
+
+Following the proposal of \citet{imperialjepa}, the prediction unit is a
+patient \emph{state}, not an event, and following their observation that future
+observations are shaped by care decisions, treatments are given to the
+predictor as inputs rather than left for it to infer.
+
+\paragraph{States.}
+Each 512-event crop is cut into calendar windows of $\Delta=4$ hours. The causal
+encoder reads the full event stream, actions included. The state of window $w$
+is the encoder output at the last observation token in the window,
+$s_w = h_{\ell(w)}$; the target state is the corresponding output of the EMA
+encoder after the parameter-free LayerNorm, $\tilde s_w$. On full MIMIC-IV,
+94\% of crops contain at least one consecutive window pair at $\Delta=4$\,h,
+with about 11.5 events per window (24-hour windows left too few pairs per crop).
+
+\paragraph{Actions.}
+For a horizon of $k$ windows, the action summary is the mean content
+embedding of the action events in windows $w,\dots,w+k-1$, together with the
+log action count:
+\begin{equation}
+a_{w,k} = \Big[\tfrac{1}{|A_{w,k}|}\textstyle\sum_{j\in A_{w,k}} E_{c_j}\;;\;\log(1+|A_{w,k}|)\Big].
+\end{equation}
+
+\paragraph{Prediction and loss.}
+An MLP predictor $p_\psi$ maps the current state, the actions, the horizon and
+the elapsed time to the future state:
+\begin{equation}
+\hat s_{w+k} = p_\psi\big(s_w,\,a_{w,k},\,e(k),\,e(t_{w+k}-t_w)\big),
+\qquad
+\mathcal{L}_{\mathrm{state}} = \frac{1}{|\mathcal{K}|}\sum_{k\in\mathcal{K}}
+\frac{1}{|\mathcal{P}_k|}\sum_{w\in\mathcal{P}_k}\ell_\beta\big(\hat s_{w+k},\,\tilde s_{w+k}\big),
+\end{equation}
+with $\mathcal{K}=\{1,2,4\}$ windows (4, 8 and 16 hours ahead) and
+$\mathcal{P}_k$ the window pairs present in the crop. The total loss keeps the
+hybrid's weights, replacing only the event-level latent target with the
+state-level one:
+\begin{equation}
+\mathcal{L}_{\mathrm{SAC}} = \mathcal{L}_{\mathrm{state}} + 0.1\,\mathcal{L}_{\mathrm{code}} + 0.05\,\mathrm{SIGReg}.
+\end{equation}
+
+\paragraph{Controls.}
+The \emph{treatment-blind} control is identical except that $a_{w,k}$ is set to
+zero, so any difference between the two isolates the use of the action input.
+After training we also measure action sensitivity on held-out crops: the
+state-prediction error with the true actions versus with actions permuted
+across patients. A model that ignores actions shows no difference.
+
+%==============================================================================
+\section{Evaluation protocol}
+\label{sec:eval}
+
+\paragraph{Tasks.}
+Seven binary tasks, defined declaratively in ACES \citep{aces}: 365-day
+mortality, 365-day inpatient admission, 30-day readmission (anchored at
+discharge), and first-ever diagnosis within 365 days of chronic kidney
+disease, COPD, diabetes and heart failure (restricted to patients with no prior
+occurrence). One anchor per subject is drawn by a seeded hash among candidate
+times with at least 32 prior events, before death, and with complete follow-up
+or death within the horizon. The headline metric is the mean AUROC over the six
+non-mortality tasks (``mean-of-6''); mortality is reported separately.
+
+\paragraph{Leakage control.}
+Model inputs are cut strictly before the anchor at a single choke point; a test
+inserts a death one day after each anchor and asserts that features and
+embeddings are bit-identical.
+
+\paragraph{Baselines.}
+Count features (log counts over 30 days, 365 days and all history, most recent
+value per code, numeric-observation counts) feed L2 logistic regression (LR) and
+XGBoost (GBM) \citep{xgboost}, both tuned on the tuning split. We audited GBM
+for leakage through near-synonyms of outcome codes that the task predicates do not
+exclude (e.g.\ hypertensive CKD for CKD, insulin use for diabetes): these appear
+in 0.7--2.0\% of positives, carry no measurable share of GBM's gain, and removing
+them leaves held-out AUROC unchanged. GBM's most important features are many
+weak signals, each at most 0.75\% of total gain.
+
+\paragraph{Frozen probe and fine-tuning.}
+The \emph{probe} fits L2 logistic regression on the final valid token's
+representation (causal) or the mean over tokens (bidirectional), with $C$ tuned
+on the tuning split. \emph{Fine-tuning} trains the encoder with a
+LayerNorm\,+\,linear head per task under binary cross-entropy, AdamW
+(learning rate $2\times10^{-5}$ for the encoder, $10^{-3}$ for the head), at most five epochs,
+early stopping on tuning AUROC with patience 2. A randomly initialized encoder of the
+same architecture is the untrained control for both.
+
+\paragraph{Statistics.}
+All models are scored on identical anchors (1{,}346 held-out subjects have an
+anchor; 1{,}025--1{,}120 rows per task). Differences use a paired bootstrap:
+2{,}000 resamples of subjects, applied jointly to both models and all tasks,
+95\% percentile intervals. When three seeds exist, the per-resample difference
+is averaged over seeds; this does not shrink test-set sampling variance, since
+all seeds share the same subjects. The seed-to-seed spread of mean-of-6 for one
+configuration at 300M tokens is 0.009; we do not interpret differences below it
+without a paired interval.
+
+\paragraph{Compute.}
+Every model is pretrained for 1B nominal tokens (30{,}518 steps of $64\times512$;
+padding makes this about 550M real events) unless stated, on one RTX~4060
+(8\,GB): about 2.7 hours for AR and 3.6 hours for the hybrid.
+
+%==============================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Latent-only objectives lose to a token loss}
+
+\begin{table}[t]
+\centering\small
+\caption{Objective families on the 8\% pool at 300M tokens, frozen probe,
+mean-of-6 AUROC, mean of three seeds (seed values in parentheses).}
+\label{tab:objectives}
+\begin{tabular}{lll}
+\toprule
+objective & mean-of-6 & seeds \\
+\midrule
+hybrid (next-latent + 0.1 next-code)      & \textbf{0.770} & (0.772, 0.766, 0.773) \\
+next-code AR                              & 0.768 & (0.775, 0.764, 0.765) \\
+masked-span JEPA, EMA target              & 0.705 & (0.713, 0.705, 0.697) \\
+masked-span, code reconstruction only     & 0.700 & (0.700, 0.701, 0.700) \\
+window-pooled latent (30/365 d)           & 0.700 & (0.701, 0.701, 0.700) \\
+next-latent, no code loss                 & 0.682 & (0.675, 0.688, 0.682) \\
+\midrule
+untrained encoder (control)               & 0.666 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:objectives} compares six objectives at a 300M-token budget.
+Every objective without a dense next-code loss on the encoder trails AR by
+0.06--0.09, far outside the 0.009 seed spread. Latent prediction is not empty:
+masked-span JEPA beats the untrained control by $+0.039$. But the gap to a
+token loss is large, consistent with the MIMIC-IV finding of
+\citet{imperialjepa} that JEPA trails MLM. At this budget the hybrid and AR are
+tied.
+
+\subsection{The hybrid separates from AR with more tokens}
+
+At 1B tokens on the 8\% pool, probed, AR reaches 0.769 (seeds 0.772, 0.770,
+0.767) and the hybrid 0.794 (0.798, 0.791, 0.794): a $+0.025$ gap with
+non-overlapping seed ranges. At 2B tokens neither improves (hybrid 0.798, AR
+0.764, seed 0); at 1B tokens the 8\% pool is already seen about 12 times, so we
+scale patients rather than tokens from here on. LR and GBM reach 0.795 and
+0.808 on the same split, so the frozen hybrid remains below GBM.
+
+\subsection{Probe versus fine-tuning}
+
+\begin{table}[t]
+\centering\small
+\caption{Mean-of-6 AUROC on the 8\% held-out subjects with 8\% train labels,
+as the pretraining pool grows. 3 seeds where marked (seed range in
+brackets); otherwise seed 0. Count baselines do not depend on pretraining.}
+\label{tab:main}
+\begin{tabular}{llcccc}
+\toprule
+pretraining pool & objective & frozen probe & fine-tuned & seeds \\
+\midrule
+\multirow{2}{*}{8\% (24k pts)}  & AR     & 0.769 & 0.806 & 3 \\
+                                & hybrid & 0.794 & 0.813 & 3 \\
+\addlinespace
+\multirow{2}{*}{25\% (73k pts)} & AR     & 0.785$^\dagger$ & 0.813 & 3 (FT) \\
+                                & hybrid & 0.797$^\dagger$ & 0.821 \,[0.818, 0.825] & 3 (FT) \\
+\addlinespace
+\multirow{2}{*}{full (249k pts)} & AR    & 0.788 & 0.814 & 1 \\
+                                 & hybrid & 0.803 & \textbf{0.822} & 1 \\
+\midrule
+none & from scratch (supervised) & --- & 0.689 & 1 \\
+\multicolumn{2}{l}{count features: GBM / LR} & \multicolumn{2}{c}{0.808 / 0.795} & --- \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize $^\dagger$seed 0.}
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:main} is the central result. Under the frozen probe, no
+encoder at any pool size reaches GBM: the best is the full-pool hybrid at 0.803
+against 0.808. Under fine-tuning, every hybrid reaches or passes GBM, and
+the ordering hybrid $>$ AR holds at every pool size. Two conclusions drawn from the
+probe alone would have been wrong. First, a probe-only study would conclude
+that pretrained encoders do not beat a tuned count model. Second, under the
+probe, growing the pool from 8\% to 25\% helped AR ($+0.016$) but not the
+hybrid ($+0.003$, inside seed spread); under fine-tuning it helped the hybrid
+($0.813\to0.821$, above GBM on every seed). The 256-dimensional frozen
+readout, not the encoder, was the bottleneck: LR on raw counts (0.795 on 8\% labels,
+0.830 when refit on 25\% labels) beats the frozen hybrid probe in both cases.
+Fine-tuned gains are flat from 25\% to the full pool at the fixed 1B budget
+(about 1.8 passes over the full pool), so the token budget, not the patient
+count, is the likely limit there.
+
+\begin{table}[t]
+\centering\small
+\caption{Per-task held-out AUROC, full-pool pretraining, fine-tuned, seed 0.}
+\label{tab:pertask}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccccc}
+\toprule
+model & inpat.\ & readm.\ & CKD & COPD & diab.\ & HF & mean-of-6 & mort.\ \\
+\midrule
+hybrid (FT) & \textbf{0.732} & \textbf{0.631} & \textbf{0.939} & \textbf{0.801} & \textbf{0.925} & \textbf{0.904} & \textbf{0.822} & 0.944 \\
+AR (FT)     & 0.717 & 0.628 & 0.937 & 0.796 & 0.914 & 0.893 & 0.814 & \textbf{0.948} \\
+GBM         & 0.700 & 0.617 & 0.930 & 0.789 & 0.913 & 0.900 & 0.808 & 0.935 \\
+LR          & 0.680 & 0.626 & 0.890 & 0.796 & 0.906 & 0.875 & 0.795 & 0.939 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{What is and is not significant}
+
+\begin{table}[t]
+\centering\small
+\caption{Paired bootstrap of fine-tuned mean-of-6 differences (2{,}000
+resamples over the 1{,}346 held-out subjects; 95\% CI; $P$ = fraction of
+resamples $>0$). ``Pooled'' averages the three seeds within each resample.}
+\label{tab:boot}
+\begin{tabular}{llcc}
+\toprule
+comparison & pretraining pool & difference [95\% CI] & $P(>0)$ \\
+\midrule
+hybrid $-$ AR  & 25\%, pooled 3 seeds & $+0.008$ \ci{+0.002}{+0.014} & 0.995 \\
+hybrid $-$ AR  & 8\%, pooled 3 seeds  & $+0.007$ \ci{-0.000}{+0.013} & 0.97 \\
+hybrid $-$ AR  & full, seed 0         & $+0.008$ \ci{+0.000}{+0.016} & 0.98 \\
+\addlinespace
+hybrid $-$ GBM & 25\%, pooled 3 seeds & $+0.013$ \ci{-0.001}{+0.028} & 0.97 \\
+hybrid $-$ GBM & full, seed 0         & $+0.014$ \ci{-0.001}{+0.028} & 0.97 \\
+AR $-$ GBM     & 25\%, pooled 3 seeds & $+0.005$ \ci{-0.009}{+0.020} & 0.76 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:boot} gives the paired intervals. Hybrid $>$ AR is
+significant with 25\%-pool pretraining and borderline at the other two pool sizes.
+Hybrid $>$ GBM is not significant: the interval includes zero in every
+configuration, although $P(>0)\ge 0.97$. AR is indistinguishable from GBM. The
+limit is the test set: 1{,}346 labelled subjects give intervals about
+$\pm0.015$ wide. Scoring the full-pool held-out split ($\approx$36k subjects) is
+the direct remedy (\S\ref{sec:limits}).
+
+\subsection{Action-conditioned patient-state gate}
+\label{sec:gate}
+
+\begin{table}[t]
+\centering\small
+\caption{State-model gate: full-pool pretraining, 1B tokens, scored on the 8\%
+held-out subjects. Seed 0 / seed 1. \textcolor{red}{Placeholders: experiment in
+progress.}}
+\label{tab:gate}
+\begin{tabular}{lccc}
+\toprule
+objective & frozen probe & fine-tuned & mortality (FT) \\
+\midrule
+hybrid                         & 0.803 / \todo{s1} & 0.822 / \todo{s1} & 0.944 / \todo{s1} \\
+AR                             & 0.788 / \todo{s1} & 0.814 / \todo{s1} & 0.948 / \todo{s1} \\
+MLM (bidirectional, 15\%)      & \todo{} & \todo{} & \todo{} \\
+state, treatment-blind         & \todo{} & \todo{} & \todo{} \\
+state, action-conditioned      & \todo{} & \todo{} & \todo{} \\
+\midrule
+GBM / LR                       & \multicolumn{2}{c}{0.808 / 0.795} & 0.935 / 0.939 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:gate} reports the gate, run under the same protocol as the fine-tuned results above. The pre-stated pass
+condition is that the action-conditioned state model beats the hybrid, AR, MLM
+and GBM under fine-tuning, and beats its treatment-blind twin.
+\todo{paired bootstrap: state\_ac $-$ hybrid, state\_ac $-$ state\_blind, state\_ac $-$ GBM, MLM $-$ AR}
+\todo{action sensitivity: held-out state-prediction error, true vs permuted actions, for state\_ac and state\_blind}
+\todo{pass/fail statement against the pre-stated condition}
+
+%==============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Why the probe misleads.}
+A frozen linear probe on one pooled vector measures how linearly accessible a
+task is in the final representation, not how useful the encoder is as an
+initialization. The two can disagree in either direction, and here they
+disagree in the direction that matters: the probe said more patients helped AR but not the
+hybrid, and that no encoder beat a count model; fine-tuning says the opposite on
+both counts. All prior EHR-JEPA comparisons we know of
+\citep{smbstructure,clinjepa,imperialjepa} are probe-only. Their rankings may be right, but
+the evidence here shows that a probe-only ranking can change under
+fine-tuning, so we recommend reporting both.
+
+\paragraph{Why the code loss is needed.}
+Latent targets from an EMA encoder are only as informative as that encoder. Without
+a token loss, nothing anchors the target to the identity of clinical events,
+and the predictor can succeed by predicting the slowly varying, easy part of
+the representation: the pure next-latent objective reaches a very low
+prediction loss with a near-zero gap between matched and shuffled target similarity, the
+signature of copying. The code loss keeps the representation discriminative; the latent
+term then adds a multi-horizon prediction signal the next-code loss does not
+provide, and SMB-Structure's improvements under a hybrid are consistent with this account.
+Our results do not support the stronger claim that latent prediction alone is
+a better EHR objective.
+
+\paragraph{From events to states and actions.}
+Event-level latent targets mix what happens to the patient with what clinicians
+decide to do \citep{imperialjepa}. Conditioning on treatments separates the two
+in the predictor's inputs. The resulting model is a predictive model of
+future states given observed treatments; because treatments in observational
+data are chosen in response to the patient's state, its action-conditioned
+predictions are confounded and should not be read as treatment effects. Whether this helps downstream
+prediction is what the gate tests. \todo{interpretation once gate results are in}
+
+\paragraph{Planned: a trial-anchored benchmark.}
+A natural external check for an action-conditioned model is whether its
+predictions, used inside a target-trial emulation \citep{hernan2016}, reproduce
+effects established by randomized trials \citep{rctduplicate}; this requires
+adjustment for confounding by indication, which our model does not provide. We plan a public
+benchmark on MIMIC-IV, and on EHRSHOT and INSPECT subject to access, that
+pairs standard prediction tasks with such trial-anchored
+checks. To our knowledge no public benchmark yet combines structured EHRs,
+action-conditioned models and trial-anchored checks; this is future work, and no
+results are reported for it here.
+
+%==============================================================================
+\section{Limitations}
+\label{sec:limits}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
+\item \textbf{Test-set size.} All downstream numbers use 1{,}346 labelled
+held-out subjects; this is why hybrid $-$ GBM is not significant. Scoring
+on the full-pool held-out split is the next step.
+\item \textbf{Seeds.} Full-pool results (Table~\ref{tab:pertask}) are one seed;
+the 25\%-pool fine-tuned results are three.
+\item \textbf{One site, one model size.} MIMIC-IV is a single academic medical
+centre with ICU and hospital data. All models have 10M parameters; a 35M run was
+started and stopped before completion. EHRSHOT and INSPECT are planned.
+\item \textbf{Fixed token budget.} Full-pool models see each event about 1.8
+times; fine-tuned gains are flat from 25\% to the full pool at that budget.
+\item \textbf{Baselines.} We compare with count-based GBM/LR and our own
+reimplementations of AR and MLM, not with released pretrained models such as
+SMB-Structure, CLMBR or MOTOR, which differ in data and size.
+\item \textbf{Actions are code-defined and confounded.} The action set is a
+code-list heuristic; dose, route and timing within a window are not modelled.
+Treatments are assigned in response to patient state, so the state model is
+predictive only; it supports no causal or counterfactual claim.
+\end{itemize}
+
+%==============================================================================
+\section{Conclusion}
+
+On public MIMIC-IV data, with seeds, paired intervals and a leakage-checked
+tabular baseline, latent prediction does not replace a token loss for EHR
+pretraining but improves on it as an auxiliary term, and the improvement is
+visible under fine-tuning and partly hidden under the frozen probe that
+previous EHR-JEPA studies relied on. The margin over tuned gradient boosting is
+positive but not significant at our test-set size. We tested a small code-token
+action-conditioned patient-state objective, with a treatment-blind control, to see whether
+the patient-state formulation proposed for EHR JEPAs, with treatments as inputs,
+improves on event-level targets. \todo{gate conclusion}
+
+\paragraph{Reproducibility.}
+Code (Apache-2.0), grid configurations and per-run summaries are in the
+project repository; every table cell maps to a committed configuration.
+\todo{repository URL and commit hashes}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

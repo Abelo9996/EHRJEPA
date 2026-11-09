@@ -747,6 +747,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     build.add_argument("--min-value-obs", type=int, default=DEFAULT_MIN_VALUE_OBS)
     _add_vocab_shape_args(build)
     build.add_argument("--splits", nargs="+", default=list(SPLITS))
+    build.add_argument(
+        "--reuse-fit-from",
+        type=Path,
+        default=None,
+        help="copy this cache's vocabulary and quantizer instead of fitting (fit args ignored)",
+    )
 
     inspect = sub.add_parser("inspect", help="print cache metadata and decoded example windows")
     inspect.add_argument("cache_dir", type=Path)
@@ -777,6 +783,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_vocab=args.max_vocab,
             ndc_digits=args.ndc_digits,
             splits=args.splits,
+            reuse_fit_from=args.reuse_fit_from,
         )
         print(json.dumps(meta, indent=2, default=str))
         return 0

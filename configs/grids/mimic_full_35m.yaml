@@ -1,0 +1,21 @@
+# Model-size test: hybrid at ~38M params (8 layers x 512, 8 heads) vs the 10M mimic-full-1b hybrid,
+# everything else identical (full-MIMIC cache via data.cache_dir override, 8%-source scoring,
+# 1B tokens, seed 0). batch 32 x accum_steps 2: at batch 64 this model peaks at 7.94/8.19 GB on the
+# 4060 and spills to shared memory (~889 tok/s). ablate keeps the 1B budget (steps divide by accum).
+name: mimic-full-35m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 1000000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+reuse_predictions: docs/experiments/mimic-ft-1b/eval/ar_8pct_s0/predictions.parquet
+reuse_models: [lr, gbm]
+control_models: []
+control_runs: []
+runs:
+  - {name: hybrid_35m_s0, overrides: {data.cache_dir: data/cache/mimic-iv-full, objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, model.dim: 512, model.depth: 8, model.heads: 8, run.batch_size: 32, optim.accum_steps: 2, run.seed: 0}}

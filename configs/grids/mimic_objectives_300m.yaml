@@ -1,0 +1,36 @@
+# Phase 1: full objective-family comparison on MIMIC-IV, 300M tokens, 3 seeds.
+# 6 families (incl. two no-code pure-JEPA cells: jepa_ema, nextlatent). Which
+# objective wins on real data? Gate: winner's mean-of-6 beats 2nd by > 0.009
+# (the Phase-0 noise floor); all must beat random-init. Seed-0 cells first.
+name: mimic-objectives-300m
+base: configs/pretrain_default.yaml
+source: mimic-iv
+budget_tokens: 300000000
+seed: 0
+bootstrap: 200
+eval_subject_limit: null
+eval_subject_seed: 0
+probe_features: auto
+probe_layer: final
+tasks: all
+control_models: [random_init]
+control_runs: [ar_s0, jepa_ema_s0]
+runs:
+  - {name: ar_s0, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 0}}
+  - {name: jepa_ema_s0, overrides: {objective.kind: jepa, model.target_mode: ema, objective.lambda_sigreg: 0.05, run.seed: 0}}
+  - {name: recon_only_s0, overrides: {objective.kind: jepa, objective.lambda_pred: 0, objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.05, predictor.mask_token_time: true, run.seed: 0}}
+  - {name: nextlatent_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 0}}
+  - {name: hybrid_s0, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 0}}
+  - {name: window_s0, overrides: {objective.kind: window, model.causal: true, model.target_mode: ema, objective.window_horizons: [30, 365], objective.window_anchors: 8, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 0}}
+  - {name: ar_s1, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 1}}
+  - {name: jepa_ema_s1, overrides: {objective.kind: jepa, model.target_mode: ema, objective.lambda_sigreg: 0.05, run.seed: 1}}
+  - {name: recon_only_s1, overrides: {objective.kind: jepa, objective.lambda_pred: 0, objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.05, predictor.mask_token_time: true, run.seed: 1}}
+  - {name: nextlatent_s1, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 1}}
+  - {name: hybrid_s1, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 1}}
+  - {name: window_s1, overrides: {objective.kind: window, model.causal: true, model.target_mode: ema, objective.window_horizons: [30, 365], objective.window_anchors: 8, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 1}}
+  - {name: ar_s2, overrides: {objective.kind: ar, model.causal: true, model.tie_embeddings: true, run.seed: 2}}
+  - {name: jepa_ema_s2, overrides: {objective.kind: jepa, model.target_mode: ema, objective.lambda_sigreg: 0.05, run.seed: 2}}
+  - {name: recon_only_s2, overrides: {objective.kind: jepa, objective.lambda_pred: 0, objective.lambda_recon: 0.1, objective.lambda_sigreg: 0.05, predictor.mask_token_time: true, run.seed: 2}}
+  - {name: nextlatent_s2, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 2}}
+  - {name: hybrid_s2, overrides: {objective.kind: nextlatent, model.causal: true, model.target_mode: ema, objective.horizons: [1, 4, 16], objective.lambda_sigreg: 0.05, objective.lambda_recon: 0.1, run.seed: 2}}
+  - {name: window_s2, overrides: {objective.kind: window, model.causal: true, model.target_mode: ema, objective.window_horizons: [30, 365], objective.window_anchors: 8, objective.lambda_sigreg: 0.05, objective.lambda_recon: 0, run.seed: 2}}
